@@ -1,6 +1,6 @@
 {
-  "name": "Palio di Siena 2027",
-  "short_name": "Palio Siena",
+  "name": "Palio di Siena",
+  "short_name": "Palio di Siena",
   "description": "Gioco gestionale e simulatore del Palio di Siena",
   "start_url": "./index.html",
   "display": "standalone",
