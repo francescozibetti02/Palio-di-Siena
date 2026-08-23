@@ -4806,7 +4806,9 @@ function assicuraFantiniContrade(tipoPalio) {
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
   if (!datiPalio || datiPalio.fantiniContrade) return;
   const partecipantiAvversari = (datiPalio.partecipanti || []).filter(n => n !== S.contrada.nome);
-  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+  const nomeFantinoGiocatore = (S.sottotipo === 'esistente')
+    ? S.nome
+    : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
   const fantiniPool = (typeof FANTINI_DB !== 'undefined')
     ? FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore)
     : [];
@@ -4857,7 +4859,9 @@ function costruisciCoppieProvePalio(tipoPalio) {
   const contradaCavallo = {};
   Object.entries(assegnazioni).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
 
-  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+  const nomeFantinoGiocatore = (S.sottotipo === 'esistente')
+    ? S.nome
+    : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
   const fantiniContrade = datiPalio.fantiniContrade || {};
   const modTemp = datiPalio.modificheTempPalio || {};
 
@@ -5064,7 +5068,9 @@ function renderProvePalio(tipoPalio) {
     <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
   `).join('');
 
-  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+  const nomeFantinoGiocatore = (S.sottotipo === 'esistente')
+    ? S.nome
+    : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
 
   let gareHtml = '';
   prove.gare.forEach((gara, gIdx) => {
@@ -7609,7 +7615,8 @@ function verificaObiettivi(){
     if(S.obiettiviCompletati[ob.id]) return; // già completato in passato
     if(typeof ob.verificato === 'function' && ob.verificato(S)){
       S.obiettiviCompletati[ob.id] = true;
-      S[campoPremio] = (S[campoPremio]||0) + PREMIO_OBIETTIVO;
+      const nuovoValorePremio = (S[campoPremio]||0) + PREMIO_OBIETTIVO;
+      S[campoPremio] = (campoPremio === 'fama') ? Math.min(100, nuovoValorePremio) : nuovoValorePremio;
       S.log.push(`Obiettivo completato: "${ob.titolo}". +${PREMIO_OBIETTIVO} ${campoPremio==='fama'?'fama':'prestigio'}.`);
       nuoviCompletati.push(ob);
     }
@@ -11439,7 +11446,11 @@ function preparaAccordiFantiniRivali(tipoPalio){
   const contradeRivali = datiPalio.partecipanti.filter(n => n !== contradaGiocatore);
 
   if(!datiPalio.fantiniRivaliAccordi){
-    const scelti = _estraiFantiniPesati(FANTINI_DB, contradeRivali.length);
+    const nomeFantinoGiocatore = (S.sottotipo === 'esistente')
+      ? S.nome
+      : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
+    const poolSenzaGiocatore = FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore);
+    const scelti = _estraiFantiniPesati(poolSenzaGiocatore, contradeRivali.length);
     const assegnazione = {};
     contradeRivali.forEach((nomeContrada, i) => {
       assegnazione[nomeContrada] = scelti[i % scelti.length].nome;
@@ -11679,22 +11690,23 @@ const STRATEGIE_CAPITANO_FANTINO = [
   { id:'vinci',           testo:'Vinci',                              icona:'🏆', dettaglio:'Il capitano non vuole sentire scuse: il Palio deve tornare nel rione.' }
 ];
 
-/* Individua la "nemica" del momento tra le contrade partecipanti: quella con
-   cui il giocatore ha l'intesa più bassa (default 50 se mai tracciata). */
+/* Individua la contrada storicamente nemica di quella per cui il fantino sta
+   correndo in questo Palio (contradaGiocatore = datiPalio.contradaFantino,
+   NON la contrada d'origine del giocatore-fantino). Usa la mappa fissa
+   RAPPORTI_CONTRADE (la stessa dell'Estrazione al Canapo), non l'intesa
+   personale del giocatore: quella misura solo il rapporto col fantino, non
+   la rivalità reale tra contrade, e una contrada senza nemica storica
+   (es. Giraffa) non deve mai risultarne assegnata una. Ritorna null se la
+   contrada montata non ha una nemica storica o se questa non partecipa al
+   Palio in corso. */
 function _trovaContradaNemicaFantino(tipoPalio, contradaGiocatore){
   if(!S) return null;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
   if(!datiPalio || !datiPalio.partecipanti) return null;
-  const rivali = datiPalio.partecipanti.filter(n => n !== contradaGiocatore);
-  if(!rivali.length) return null;
-  if(!S.intesaContrade) S.intesaContrade = {};
-  let minVal = Infinity, candidate = [];
-  rivali.forEach(n => {
-    const v = (S.intesaContrade[n] !== undefined) ? S.intesaContrade[n] : 50;
-    if(v < minVal){ minVal = v; candidate = [n]; }
-    else if(v === minVal){ candidate.push(n); }
-  });
-  return candidate[Math.floor(Math.random()*candidate.length)] || null;
+  const rapp = RAPPORTI_CONTRADE[contradaGiocatore];
+  const rivaliStorici = (rapp && rapp.rivali) ? rapp.rivali : [];
+  const rivalePresente = rivaliStorici.find(n => datiPalio.partecipanti.includes(n));
+  return rivalePresente || null;
 }
 
 /* Genera (una sola volta per Palio) e ritorna la strategia del capitano. */
@@ -11703,10 +11715,19 @@ function preparaStrategiaCapitanoFantino(tipoPalio){
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
   if(!datiPalio || !datiPalio.contradaFantino) return null;
   if(!datiPalio.strategiaCapitanoFantino){
-    const scelta = STRATEGIE_CAPITANO_FANTINO[Math.floor(Math.random()*STRATEGIE_CAPITANO_FANTINO.length)];
+    const bersaglioNemica = _trovaContradaNemicaFantino(tipoPalio, datiPalio.contradaFantino);
+    // "Impedisci la vittoria della nemica" ha senso solo se la Contrada che il
+    // fantino monta ha davvero una nemica storica presente in questo Palio
+    // (es. la Giraffa non ne ha alcuna): altrimenti si esclude dal ventaglio
+    // di strategie estraibili, per non far pronunciare al capitano
+    // un'istruzione contro un nemico inesistente.
+    const pool = bersaglioNemica
+      ? STRATEGIE_CAPITANO_FANTINO
+      : STRATEGIE_CAPITANO_FANTINO.filter(s => s.id !== 'ostacola_nemica');
+    const scelta = pool[Math.floor(Math.random()*pool.length)];
     const strategia = { id: scelta.id, bersaglio: null, valutata: false };
     if(scelta.id === 'ostacola_nemica'){
-      strategia.bersaglio = _trovaContradaNemicaFantino(tipoPalio, datiPalio.contradaFantino);
+      strategia.bersaglio = bersaglioNemica;
     }
     datiPalio.strategiaCapitanoFantino = strategia;
     salvaCorrente();
