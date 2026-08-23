@@ -512,10 +512,10 @@ const CONTRADE = [
   { nome:'Giraffa',      img:'contrada_giraffa.png',      bonus:'Collo lungo: minigioco Spionaggio più facile',                  bonusKey:'spionaggio_facile',  bonusVal:1   },
   { nome:'Istrice',      img:'contrada_istrice.png',      bonus:'Spine difensive: minor probabilità di subire scherzi rivali',   bonusKey:'anti_scherzo',       bonusVal:1   },
   { nome:'Leocorno',     img:'contrada_leocorno.png',     bonus:'Grazia reale: +5% probabilità che il fantino accetti strategie', bonusKey:'bonus_tattica',      bonusVal:5   },
-  { nome:'Lupa',         img:'contrada_lupa.png',         bonus:'Ferocia romana: organizzare la cena nel maniero costa 100 oro', bonusKey:'cena_economica',     bonusVal:100 },
+  { nome:'Lupa',         img:'contrada_lupa.png',         bonus:'Ferocia romana: organizzare la cena nella società costa 100 oro', bonusKey:'cena_economica',     bonusVal:100 },
   { nome:'Nicchio',      img:'contrada_nicchio.png',      bonus:'Perle del mare: gadget venduti al triplo del morale × fattore', bonusKey:'gadget_triplo',      bonusVal:3   },
   { nome:'Oca',          img:'contrada_oca.png',          bonus:'Slancio improvviso: cavallo +1 Velocità durante il Palio',      bonusKey:'vel_palio',          bonusVal:1   },
-  { nome:'Onda',         img:'contrada_onda.png',         bonus:'Pietra solida: manutenzione maniero costa 400 oro',             bonusKey:'manutenzione_400',   bonusVal:400 },
+  { nome:'Onda',         img:'contrada_onda.png',         bonus:'Pietra solida: manutenzione società costa 400 oro',             bonusKey:'manutenzione_400',   bonusVal:400 },
   { nome:'Pantera',      img:'contrada_pantera.png',      bonus:'Balzo felino: cavallo +1 Accelerazione durante il Palio',       bonusKey:'acc_palio',          bonusVal:1   },
   { nome:'Selva',        img:'contrada_selva.png',        bonus:'Bosco antico: fantino +1 Bravura durante il Palio',             bonusKey:'bravura_palio',      bonusVal:1   },
   { nome:'Tartuca',      img:'contrada_tartuca.png',      bonus:'Corazza di pietra: cavallo +1 Tenuta Curva durante il Palio',   bonusKey:'curva_palio',        bonusVal:1   },
@@ -559,14 +559,14 @@ function relazioneIniziale(nomeContradaGiocatore, nomeAltra){
   return 'neutrale';
 }
 
-/* ── Maniero: costanti delle azioni mensili (ognuna usabile max 1 volta al mese) ── */
+/* ── Società: costanti delle azioni mensili (ognuna usabile max 1 volta al mese) ── */
 const PROBABILITA_IMPREVISTI_BASE = 0.30;
 const PROBABILITA_IMPREVISTI_RIDOTTA = 0.20;
 const MANIERO_AZIONI = {
   cena:          { costo:200, label:'Organizza una cena' },
   gadget:        { costo:0,   label:'Vendita gadget di contrada' },
   evento:        { costo:300, label:'Organizza un evento' },
-  manutenzione:  { costo:500, label:'Manutenzione del maniero' },
+  manutenzione:  { costo:500, label:'Manutenzione della Società' },
   protezione:    { costo:500, label:'Proteggiti dagli scherzi' }
 };
 
@@ -685,10 +685,10 @@ const MOSSA_BONUS_PESSIMA  = 0.75;
    basate sullo storico delle vittorie e vengono controllate normalmente. */
 const PREMIO_OBIETTIVO = 5;
 const OBIETTIVI_CAPITANO = [
-  { id:'cena_fatta',         icona:'🍷', titolo:'Organizza una cena',         descrizione:'Organizza almeno una cena nel maniero.',                 tipo:'azione', verificato:S=>!!S._storicoAzioni?.cena },
+  { id:'cena_fatta',         icona:'🍷', titolo:'Organizza una cena',         descrizione:'Organizza almeno una cena nella Società.',                 tipo:'azione', verificato:S=>!!S._storicoAzioni?.cena },
   { id:'gadget_fatto',       icona:'🎁', titolo:'Vendi i gadget',             descrizione:'Organizza almeno una vendita di gadget di contrada.',    tipo:'azione', verificato:S=>!!S._storicoAzioni?.gadget },
   { id:'evento_fatto',       icona:'🎉', titolo:'Organizza un evento',        descrizione:'Organizza almeno un evento per la contrada.',            tipo:'azione', verificato:S=>!!S._storicoAzioni?.evento },
-  { id:'maniero_splendente', icona:'🏰', titolo:'Maniero splendente',         descrizione:'Porta le condizioni del maniero a 100.',                 tipo:'soglia', verificato:S=>!!(S.maniero && S.maniero.condizioni >= 100) },
+  { id:'maniero_splendente', icona:'🏰', titolo:'Società splendente',         descrizione:'Porta le condizioni della Società a 100.',                 tipo:'soglia', verificato:S=>!!(S.maniero && S.maniero.condizioni >= 100) },
   { id:'sostegno_incond',    icona:'😊', titolo:'Sostegno incondizionato',    descrizione:'Porta il morale dei contradaioli a 100.',                tipo:'soglia', verificato:S=>!!(S.maniero && S.maniero.morale >= 100) },
   { id:'amicizia_stelle',    icona:'🤝', titolo:'Amicizia alle stelle',       descrizione:"Porta l'amicizia con una contrada a 100.",               tipo:'soglia', verificato:S=>!!(S.amicizia && Object.values(S.amicizia).some(v=>v>=100)) },
   { id:'intesa_totale',      icona:'🏇', titolo:'Intesa totale',              descrizione:"Porta l'intesa con un fantino a 100.",                   tipo:'soglia', verificato:S=>!!(S.intesaFantini && Object.values(S.intesaFantini).some(v=>v>=100)) },
@@ -1327,7 +1327,7 @@ function renderGiocoCapitano(){
       <button class="sec-btn" onclick="renderManiero()">
         <span class="sec-btn-icon">🏰</span>
         <div>
-          <div class="sec-btn-label">Maniero</div>
+          <div class="sec-btn-label">Società</div>
           <div class="sec-btn-sub">La sede della contrada: stalle, magazzino, consiglio</div>
         </div>
         <span class="sec-btn-chev">›</span>
@@ -1411,10 +1411,10 @@ function eseguiAvanzamentoMeseEffettivo(){
     nuovoAnno = true;
     S.log.push(`L'annata si conclude. Inizia il nuovo anno: Gennaio ${S.anno}.`);
   }
-  // Le azioni del maniero si possono usare una volta al mese: si resettano ad ogni cambio mese
+  // Le azioni della Società si possono usare una volta al mese: si resettano ad ogni cambio mese
   if(S.maniero){
     S.maniero.azioniUsateMese = {};
-    // Il tempo logora il maniero: ogni mese le condizioni calano di 5 punti
+    // Il tempo logora la Società: ogni mese le condizioni calano di 5 punti
     S.maniero.condizioni = Math.max(0, S.maniero.condizioni - 5);
     // La riduzione della probabilità di imprevisti vale solo per l'anno in cui è stata attivata
     if(S.maniero.annoProbabilitaRidotta !== null && S.maniero.annoProbabilitaRidotta !== S.anno){
@@ -1632,8 +1632,8 @@ function generaImprevistoMensile(){
   switch(tipo){
     case 'tetto': {
       if(S.maniero) S.maniero.condizioni = 0;
-      S.log.push('Imprevisto: crolla parte del tetto del maniero. Condizioni del maniero azzerate.');
-      return { titolo:'Crolla il tetto del maniero!', testo:'Una trave marcia ha ceduto sotto il peso degli anni: il tetto del maniero è crollato in più punti. Le condizioni della sede sono ora pessime: servirà una manutenzione urgente.' };
+      S.log.push('Imprevisto: crolla parte del tetto della società. Condizioni della società azzerate.');
+      return { titolo:'Crolla il tetto della Società!', testo:'Una trave marcia ha ceduto sotto il peso degli anni: il tetto della società è crollato in più punti. Le condizioni della sede sono ora pessime: servirà una manutenzione urgente.' };
     }
     case 'fantino_no': {
       const nomi = (typeof FANTINI_DB!=='undefined') ? FANTINI_DB.map(f=>f.nome) : [];
@@ -1722,6 +1722,7 @@ const FASI_PALIO = [
   { id:'presentazione',    titolo:'Presentazione del Lotto',  icona:'📜', descrizione:'Il Comune di Siena presenta ufficialmente i cavalli sorteggiati.' },
   { id:'assegnazione',     titolo:'Assegnazione Cavalli',     icona:'✅', descrizione:'I cavalli vengono assegnati definitivamente alle rispettive contrade.' },
   { id:'ingaggio',         titolo:'Ingaggia il Fantino',      icona:'🤝', descrizione:'Le contrade trattano e concludono l\'accordo con il fantino per la corsa.' },
+  { id:'prove',            titolo:'Le Prove',                 icona:'🏁', descrizione:'Sei corse di prova in Piazza del Campo con le accoppiate ufficiali di cavallo e fantino.' },
   { id:'cena_vigilia',     titolo:'Cena della Vigilia',       icona:'🍷', descrizione:'La grande cena della contrada nella piazzetta del rione, la sera prima del Palio.' },
   { id:'accordi',          titolo:'Accordi Segreti',          icona:'🗺️', descrizione:'Il capitano concorda accordi segreti con le contrade alleate per favorire il passaggio.' },
   { id:'tattica',          titolo:'Tattica di Gara',          icona:'⚔️', descrizione:'Il capitano impartisce le istruzioni tattiche al fantino per la Carriera.' },
@@ -1737,6 +1738,7 @@ const TESTI_FASI_PALIO = {
   presentazione: `Il Comune convoca ufficialmente le dieci contrade. I nomi dei cavalli vengono letti ad alta voce davanti ai rappresentanti e alla folla. Da questo momento ogni contrada sa su quale animale dovrà puntare tutto.`,
   assegnazione: `Le assegnazioni sono definitive: nessun cambio è più possibile. Le contrade ritirano i cavalli e li portano nelle stalle ricavate nel rione. Per tre giorni il cavallo è sacro — un ospite d'onore che mangia e dorme meglio dei contradaioli.`,
   ingaggio: `Le trattative con i fantini si svolgono nell'ombra: cifre, promesse, minacce velate. Il capitano incontra il suo uomo, stringe accordi, paga l'anticipo. Il fantino sa già per chi correrà — e per chi non correrà mai.`,
+  prove: `Sei prove in Piazza del Campo, con le accoppiate ormai ufficiali di cavallo e fantino. Ogni uscita in pista è un banco di prova pubblico: le contrade migliori si fanno notare, quelle in difficoltà tradiscono le loro debolezze — e le voci corrono in fretta tra i rioni.`,
   cena_vigilia: `Le tavole si allungano per tutta la via del rione. Centinaia di contradaioli cenano insieme sotto le stelle, tra torce e bandiere. Il vino scorre, i canti si alzano. Domani sarà Palio.`,
   accordi: `Nell'ora più silenziosa della notte, il capitano chiama il fantino a sé. Si parla di posizioni alla mossa, di chi bloccare, di chi aiutare. Un accordo con un alleato può valere più di un cavallo veloce.`,
   tattica: `Prima che il sole sorga sulla piazza, il capitano e il fantino si appartano. Le parole sono poche e precise: come partire, quando spingere, come gestire le curve del Casato e di San Martino. Il fantino ascolta — poi decide se obbedire.`,
@@ -1836,11 +1838,48 @@ function calcolaVincitorePalio(partecipanti, contradaGiocatore) {
   return partecipanti[partecipanti.length - 1];
 }
 
+/* Estrae un'accoppiata casuale cavallo-fantino da mostrare nella schermata finale
+   riassuntiva quando il giocatore non ha partecipato al Palio (sia in Carriera
+   Capitano sia in Carriera Fantino). Il fantino è sempre casuale tra quelli del
+   database esterno (FANTINI_DB). Il cavallo è casuale tra quelli con almeno 2
+   corse in provincia nell'anno corrente (S.scoreCavalliAnno); se le corse in
+   provincia non sono state effettuate (nessun cavallo raggiunge questa soglia),
+   il cavallo è casuale tra quelli del database esterno (CAVALLI_DB). */
+function estraiAccoppiataVincentePalioAssente() {
+  if (typeof CAVALLI_DB === 'undefined' || typeof FANTINI_DB === 'undefined') return null;
+  if (!CAVALLI_DB.length || !FANTINI_DB.length) return null;
+
+  const fantino = FANTINI_DB[Math.floor(Math.random() * FANTINI_DB.length)];
+
+  const score = (S && S.scoreCavalliAnno) ? S.scoreCavalliAnno : {};
+  const cavalliQualificati = CAVALLI_DB.filter(c => (score[c.nome]?.corse || 0) >= 2);
+  const poolCavalli = cavalliQualificati.length ? cavalliQualificati : CAVALLI_DB;
+  const cavallo = poolCavalli[Math.floor(Math.random() * poolCavalli.length)];
+
+  return { cavallo, fantino };
+}
+
+/* Ritorna l'HTML del box "accoppiata vincente" per le schermate finali di Palio
+   non disputato dal giocatore, oppure stringa vuota se non disponibile. */
+function htmlAccoppiataVincentePalioAssente(accoppiata) {
+  if (!accoppiata) return '';
+  return `
+        <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.5);margin-bottom:20px">
+          Accoppiata vincente: 🐎 <strong style="color:var(--ocra-l)">${accoppiata.cavallo.nome}</strong> · 🏇 <strong style="color:var(--ocra-l)">${accoppiata.fantino.nome}</strong>
+        </div>`;
+}
+
 /* Schermata per la contrada non partecipante: solo vincitore */
 function renderPalioNonPartecipante(tipoPalio, vincitore) {
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
   const datiVincitore = CONTRADE.find(c => c.nome === vincitore);
   const isGiocatore = vincitore === S.contrada.nome; // non dovrebbe mai essere vero qui
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (datiPalio && !datiPalio.accoppiataVincente) {
+    datiPalio.accoppiataVincente = estraiAccoppiataVincentePalioAssente();
+    salvaCorrente();
+  }
+  const accoppiata = datiPalio ? datiPalio.accoppiataVincente : estraiAccoppiataVincentePalioAssente();
 
   const nextFn = tipoPalio === 'luglio' ? 'avanzaMeseCapitano()' : 'concludiAnnataCapitano()';
 
@@ -1867,10 +1906,11 @@ function renderPalioNonPartecipante(tipoPalio, vincitore) {
         <div style="font-family:var(--fs);font-size:26px;font-weight:700;color:var(--ocra);margin-bottom:8px">
           Contrada del${/^[AEIOU]/.test(vincitore)?'l\'':' '}${vincitore}
         </div>
-        <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);line-height:1.7;margin-bottom:20px">
+        <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);line-height:1.7;margin-bottom:12px">
           Il drappellone di ${nomePalio} ${S.anno} va alla Contrada del${/^[AEIOU]/.test(vincitore)?'l\'':' '}${vincitore}.<br>
           La tua contrada osserva dalla finestra — l'anno prossimo andrà meglio.
         </div>
+        ${htmlAccoppiataVincentePalioAssente(accoppiata)}
         <button class="btn gold w" onclick="${nextFn}">
           ${tipoPalio === 'luglio' ? '📅 Vai a Luglio →' : '📅 Nuovo anno →'}
         </button>
@@ -1915,6 +1955,12 @@ function renderFasePalio(tipoPalio, faseIdx) {
   // Ingaggio del Fantino — trattativa con i fantini del database
   if (fase.id === 'ingaggio') {
     renderIngaggioFantino(tipoPalio);
+    return;
+  }
+
+  // Le Prove — sei corse ufficiali con le accoppiate cavallo/fantino già decise
+  if (fase.id === 'prove') {
+    renderProvePalio(tipoPalio);
     return;
   }
 
@@ -2339,6 +2385,17 @@ function preparaCorsaPalioFantino(tipoPalio) {
     // Il nervosismo modificato dagli effetti del canape si applica solo al cavallo del giocatore
     if (isMe && modTemp.nervosismoOffset) {
       cav.nervosismo = Math.max(1, (cav.nervosismo || 2) + modTemp.nervosismoOffset);
+    }
+
+    // Effetti scelti durante le Prove (ferratura, prova forte San Martino, ecc.):
+    // restano validi fino a fine Palio, quindi si applicano anche qui.
+    if (isMe && datiPalio.proveFantino && datiPalio.proveFantino.effetti) {
+      const eff = datiPalio.proveFantino.effetti;
+      if (eff.velocita)      cav.velocita      = Math.max(1, (cav.velocita      || 3) + eff.velocita);
+      if (eff.accelerazione) cav.accelerazione = Math.max(1, (cav.accelerazione || 3) + eff.accelerazione);
+      if (eff.tenuta_curva)  cav.tenuta_curva  = Math.max(1, (cav.tenuta_curva  || 3) + eff.tenuta_curva);
+      if (eff.resistenza)    cav.resistenza    = Math.max(1, (cav.resistenza    || 3) + eff.resistenza);
+      if (eff.nervosismo)    cav.nervosismo    = Math.max(1, (cav.nervosismo    || 2) + eff.nervosismo);
     }
 
     return { nomeContrada, cavallo: cav, fantino: fan, isMe };
@@ -2999,10 +3056,10 @@ function renderCorsaPalio(tipoPalio) {
   if (!datiPalio) return;
 
   const corsa = preparaCorsaPalio(tipoPalio);
-  if (!corsa) { avanzaFasePalio(tipoPalio, 10); return; }
+  if (!corsa) { avanzaFasePalio(tipoPalio, 11); return; }
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 9;
+  const faseIdx = 10;
 
   const progressHtml = FASI_PALIO.map((f, i) => `
     <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -3071,10 +3128,10 @@ function renderCorsaPalioFantino(tipoPalio) {
   if (!datiPalio) return;
 
   const corsa = preparaCorsaPalioFantino(tipoPalio);
-  if (!corsa) { avanzaFasePalioFantino(tipoPalio, 10); return; }
+  if (!corsa) { avanzaFasePalioFantino(tipoPalio, 11); return; }
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 9;
+  const faseIdx = 10;
 
   const progressHtml = FASI_PALIO_FANTINO.map((f, i) => `
     <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -3635,11 +3692,11 @@ function mostraRisultatoFinale(st) {
   }
 
   const btnNext = eFantino
-    ? `<button class="btn gold w" onclick="avanzaFasePalioFantino('${tipoPalio}', 10)">
-        🏆 ${FASI_PALIO_FANTINO[10].titolo} →
+    ? `<button class="btn gold w" onclick="avanzaFasePalioFantino('${tipoPalio}', 11)">
+        🏆 ${FASI_PALIO_FANTINO[11].titolo} →
       </button>`
-    : `<button class="btn gold w" onclick="avanzaFasePalio('${tipoPalio}', 10)">
-        🏆 ${FASI_PALIO[10].titolo} →
+    : `<button class="btn gold w" onclick="avanzaFasePalio('${tipoPalio}', 11)">
+        🏆 ${FASI_PALIO[11].titolo} →
       </button>`;
 
   divBtn.innerHTML = `
@@ -4718,6 +4775,392 @@ function toggleSelezioneCavallo(tipoPalio, nomeCavallo) {
   renderSceltaCavalliPalio(tipoPalio);
 }
 
+/* ═══════════════════════════════════════════════
+   LE PROVE — fase 5 del Palio (solo Carriera Capitano)
+   Sei corse ufficiali in Piazza del Campo con le accoppiate di
+   cavallo e fantino ormai decise (le stesse che si ritroveranno
+   negli Accordi Segreti e nella Carriera vera e propria). Prima
+   di ogni prova il giocatore può scegliere un intervento sul
+   proprio cavallo (effetto permanente fino a fine Palio, salvato
+   in datiPalio.modificheTempPalio come per Tattica e Cena della
+   Vigilia). I piazzamenti ottenuti dalle contrade nelle sei prove
+   influenzano poi le cifre richieste per gli Accordi Segreti:
+   +250 oro per ogni prova chiusa nei primi 3 posti, -250 oro per
+   ogni prova chiusa negli ultimi 3.
+═══════════════════════════════════════════════ */
+const NUM_PROVE_PALIO = 6;
+
+const EFFETTI_PROVE_PALIO = [
+  { id:'ferratura',   titolo:'Nuova ferratura',    icona:'🔨', costo:200, stat:'tenuta_curva',  delta: 0.5, desc:'+0,5 tenuta in curva del cavallo, fino a fine Palio.' },
+  { id:'imboccatura', titolo:'Cambio imboccatura', icona:'🪢', costo:200, stat:'velocita',       delta: 0.5, desc:'+0,5 velocità del cavallo, fino a fine Palio.' },
+  { id:'mangime',     titolo:'Super mangime',      icona:'🌾', costo:100, stat:'accelerazione',  delta: 0.5, desc:'+0,5 accelerazione del cavallo, fino a fine Palio.' },
+  { id:'scarico',     titolo:'Giretto di scarico', icona:'🚶', costo:50,  stat:'nervosismoOffset', delta:-0.5, desc:'−0,5 nervosismo del cavallo, fino a fine Palio.' },
+  { id:'niente',      titolo:'Va bene così',       icona:'🤷', costo:0,   stat:null,             delta: 0,   desc:'Nessun intervento: nessun vantaggio, nessuna spesa.' }
+];
+
+/* Assegna un fantino a ogni contrada avversaria (se non già fatto), riusando
+   la stessa logica già impiegata dagli Accordi Segreti: viene chiamata da
+   Le Prove per la prima volta, così le accoppiate restano identiche in
+   entrambe le schermate e nella Carriera finale. */
+function assicuraFantiniContrade(tipoPalio) {
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (!datiPalio || datiPalio.fantiniContrade) return;
+  const partecipantiAvversari = (datiPalio.partecipanti || []).filter(n => n !== S.contrada.nome);
+  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+  const fantiniPool = (typeof FANTINI_DB !== 'undefined')
+    ? FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore)
+    : [];
+  for (let i = fantiniPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [fantiniPool[i], fantiniPool[j]] = [fantiniPool[j], fantiniPool[i]];
+  }
+  datiPalio.fantiniContrade = {};
+  if (fantiniPool.length > 0) {
+    partecipantiAvversari.forEach((nc, idx) => {
+      datiPalio.fantiniContrade[nc] = fantiniPool[idx % fantiniPool.length];
+    });
+  }
+  salvaCorrente();
+}
+
+function preparaProvePalio(tipoPalio) {
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (!datiPalio) return null;
+  if (datiPalio.prove) return datiPalio.prove;
+  if (!datiPalio.partecipanti || !datiPalio.assegnazione) return null;
+
+  assicuraFantiniContrade(tipoPalio);
+
+  const gare = [];
+  for (let i = 0; i < NUM_PROVE_PALIO; i++) {
+    gare.push({ numero: i + 1, effettoScelto: null, risultato: null, completata: false });
+  }
+
+  const punteggi = {};
+  datiPalio.partecipanti.forEach(n => { punteggi[n] = { top3: 0, bottom3: 0 }; });
+
+  datiPalio.prove = {
+    gare,
+    garaCorrente: 0,
+    tutteComplete: false,
+    punteggi
+  };
+  salvaCorrente();
+  return datiPalio.prove;
+}
+
+/* Costruisce le coppie cavallo/fantino per la simulazione di una prova, applicando
+   al cavallo del giocatore gli effetti già acquistati (datiPalio.modificheTempPalio). */
+function costruisciCoppieProvePalio(tipoPalio) {
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  const assegnazioni = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {}; // {nomeCavallo: nomeContrada}
+  const contradaCavallo = {};
+  Object.entries(assegnazioni).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
+
+  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+  const fantiniContrade = datiPalio.fantiniContrade || {};
+  const modTemp = datiPalio.modificheTempPalio || {};
+
+  return (datiPalio.partecipanti || []).map(nomeContrada => {
+    const isMe = nomeContrada === S.contrada.nome;
+    const nomeCav = contradaCavallo[nomeContrada];
+    const cavBase = (nomeCav && typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(c => c.nome === nomeCav) : null;
+    const cav = Object.assign({}, cavBase || { nome:'Cavallo', velocita:3, resistenza:3, accelerazione:3, tenuta_curva:3, nervosismo:2 });
+
+    let fan;
+    if (isMe && nomeFantinoGiocatore && typeof FANTINI_DB !== 'undefined') {
+      fan = FANTINI_DB.find(f => f.nome === nomeFantinoGiocatore) || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
+    } else {
+      fan = fantiniContrade[nomeContrada] || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
+    }
+
+    if (isMe) {
+      if (modTemp.velocita)         cav.velocita      = Math.max(1, (cav.velocita      || 3) + modTemp.velocita);
+      if (modTemp.tenuta_curva)     cav.tenuta_curva  = Math.max(1, (cav.tenuta_curva  || 3) + modTemp.tenuta_curva);
+      if (modTemp.accelerazione)    cav.accelerazione = Math.max(1, (cav.accelerazione || 3) + modTemp.accelerazione);
+      if (modTemp.resistenza)       cav.resistenza    = Math.max(1, (cav.resistenza    || 3) + modTemp.resistenza);
+      if (modTemp.nervosismoOffset) cav.nervosismo    = Math.max(1, (cav.nervosismo    || 2) + modTemp.nervosismoOffset);
+    }
+
+    return { nomeContrada, cavallo: cav, fantino: fan, isMe };
+  });
+}
+
+/* Nelle prove reali le accoppiate più forti (cavallo forte + fantino di buon livello,
+   quindi papabili per il podio del Palio) tendono a "giocare coperto": non spingono
+   al massimo, arrivano a metà gruppo (5°-6°-7°) e non vincono tutte le prove, per
+   poi sorprendere gli avversari scatenando tutto il loro valore il giorno del Palio.
+   Questa funzione individua le coppie più forti fra i partecipanti a una prova e
+   applica loro una penalità di tempo variabile (diversa a ogni prova, e non sempre
+   presente, per non renderla un pattern prevedibile) prima di stilare la classifica.
+   Si usa SOLO nelle prove: la corsa vera e propria del Palio (preparaCorsaPalio /
+   preparaCorsaPalioFantino) resta calcolata sulle statistiche reali, senza copertura. */
+function applicaGiocoCopertoProve(risultati, coppie) {
+  // Variabilità generale della prova: la forma del giorno, piccoli imprevisti e la
+  // pista non danno mai lo stesso risultato a parità di cavallo e fantino. Senza
+  // questa variazione l'ordine d'arrivo delle prove sarebbe quasi identico ogni
+  // volta, dato che le statistiche delle coppie cambiano pochissimo da una prova
+  // all'altra. Non si applica alle cadute, il cui tempo è già penalizzato a parte.
+  risultati.forEach(r => {
+    if (r.caduta) return;
+    r.tempo *= 1 + (Math.random() - 0.5) * 0.12; // +-6% di variazione casuale
+  });
+
+  // Ordina in base al "vero" valore della prova (statistiche + variazione di forma):
+  // è la classifica che si otterrebbe se tutti corressero a viso aperto.
+  risultati.sort((a, b) => a.tempo - b.tempo);
+
+  const forzaPerContrada = {};
+  coppie.forEach(c => {
+    const cav = c.cavallo || {};
+    const fan = c.fantino || {};
+    const forzaCavallo = ((cav.velocita || 3) + (cav.resistenza || 3) + (cav.accelerazione || 3) + (cav.tenuta_curva || 3)) / 4;
+    const forzaFantino = ((fan.bravura || 3) + (fan.esperienza || 3)) / 2;
+    // Peso maggiore al cavallo: è la combinazione "cavallo forte-fantino medio forte"
+    // quella che nella realtà tende a nascondersi durante le prove.
+    forzaPerContrada[c.nomeContrada] = forzaCavallo * 0.65 + forzaFantino * 0.35;
+  });
+
+  const n = risultati.length;
+  const ordinatePerForza = Object.entries(forzaPerContrada).sort((a, b) => b[1] - a[1]);
+  const numFavoriti = Math.max(1, Math.round(n * 0.3)); // i papabili per il podio del Palio
+
+  // Se un favorito non si "svela" in questa prova, viene spostato di forza a metà
+  // gruppo (né davanti né in fondo): è lì che nella realtà si nasconde chi ha
+  // l'accoppiata più forte, per non far capire agli avversari il proprio valore
+  // prima del Palio vero. Una semplice penalità di tempo non basterebbe, perché un
+  // distacco di statistiche marcato (es. il cavallo più forte del lotto) potrebbe
+  // comunque emergere lo stesso: qui invece la posizione viene garantita.
+  const fasciaInizio = Math.min(n - 1, Math.floor(n * 0.4));
+  const fasciaFine   = Math.min(n - 1, Math.floor(n * 0.75));
+
+  ordinatePerForza.slice(0, numFavoriti).forEach(([nomeContrada]) => {
+    // Ogni tanto il favorito si toglie la maschera e corre a viso aperto:
+    // altrimenti la copertura sarebbe un pattern riconoscibile prova dopo prova.
+    if (Math.random() < 0.22) return;
+    const curIdx = risultati.findIndex(r => r.nomeContrada === nomeContrada);
+    if (curIdx === -1) return;
+    const r = risultati[curIdx];
+    if (r.caduta) return;
+    if (curIdx >= fasciaInizio) return; // è già a metà gruppo o più indietro: nulla da nascondere
+    const [entry] = risultati.splice(curIdx, 1);
+    const nuovaPos = Math.min(risultati.length, fasciaInizio + Math.floor(Math.random() * (fasciaFine - fasciaInizio + 1)));
+    risultati.splice(nuovaPos, 0, entry);
+  });
+
+  return risultati;
+}
+
+/* Nella realtà è praticamente impossibile che la stessa contrada vinca tutte e sei
+   le prove del Palio. Se la contrada in testa in questo risultato ha già vinto
+   ogni prova precedente, e questa sarebbe l'ultima prova necessaria a completare
+   il "cappotto", si scambia con la seconda classificata prima di consolidare il
+   risultato (le altre posizioni restano invariate). */
+function evitaSweepTotaleProve(risultato, gareGiaFatte, numeroProveTotali) {
+  if (!risultato || risultato.length < 2 || !gareGiaFatte || !gareGiaFatte.length) return risultato;
+  const vincitrici = gareGiaFatte.map(g => g.risultato && g.risultato[0] && g.risultato[0].nomeContrada);
+  if (vincitrici.some(n => !n)) return risultato;
+  const primaAttuale = risultato[0].nomeContrada;
+  const haVintoSempre = vincitrici.every(n => n === primaAttuale);
+  if (haVintoSempre && vincitrici.length + 1 === numeroProveTotali) {
+    const tmp = risultato[0];
+    risultato[0] = risultato[1];
+    risultato[1] = tmp;
+  }
+  return risultato;
+}
+
+/* Variante di simulaGara() che preserva il nome della contrada nel risultato
+   (simulaGara scarta le proprietà extra delle coppie in ingresso). */
+function simulaProvaPalio(coppie, pista) {
+  const risultati = coppie.map(c => {
+    const r = simulaCorsaCoppia(c.cavallo, c.fantino, pista, c.bonusVelocitaMossa);
+    return { nomeContrada: c.nomeContrada, cavallo: c.cavallo, fantino: c.fantino, tempo: r.tempo, caduta: r.caduta, isMe: !!c.isMe };
+  });
+  return applicaGiocoCopertoProve(risultati, coppie);
+}
+
+/* Il giocatore sceglie l'intervento da fare sul cavallo prima della prova corrente. */
+function scegliEffettoProvaPalio(tipoPalio, garaIdx, effettoId) {
+  if (!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (!datiPalio || !datiPalio.prove) return;
+  const gara = datiPalio.prove.gare[garaIdx];
+  if (!gara || gara.completata || gara.effettoScelto) return;
+
+  const eff = EFFETTI_PROVE_PALIO.find(e => e.id === effettoId);
+  if (!eff) return;
+
+  if (eff.costo > 0) {
+    if ((S.oro || 0) < eff.costo) {
+      mostraPopupErrore('Oro insufficiente', `Questo intervento costa ${eff.costo} oro. Al momento ne possiedi ${S.oro}.`);
+      return;
+    }
+    S.oro -= eff.costo;
+  }
+  if (eff.stat) {
+    if (!datiPalio.modificheTempPalio) datiPalio.modificheTempPalio = {};
+    datiPalio.modificheTempPalio[eff.stat] = (datiPalio.modificheTempPalio[eff.stat] || 0) + eff.delta;
+  }
+  gara.effettoScelto = eff.id;
+  S.log.push(eff.costo > 0
+    ? `Prova ${gara.numero}: ${eff.titolo} (-${eff.costo} oro).`
+    : `Prova ${gara.numero}: nessun intervento sul cavallo.`);
+  salvaCorrente();
+  renderProvePalio(tipoPalio);
+}
+
+/* Disputa la prova corrente (richiede che l'effetto sia già stato scelto) e
+   aggiorna i punteggi delle contrade ai fini delle cifre degli Accordi Segreti. */
+function disputaProvaPalio(tipoPalio, garaIdx) {
+  if (!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (!datiPalio || !datiPalio.prove) return;
+  const prove = datiPalio.prove;
+  const gara = prove.gare[garaIdx];
+  if (!gara || gara.completata || !gara.effettoScelto) return;
+
+  const coppie = costruisciCoppieProvePalio(tipoPalio);
+  const gareGiaFatte = prove.gare.filter(g => g.completata);
+  const risultato = evitaSweepTotaleProve(simulaProvaPalio(coppie, PISTA_CAMPO), gareGiaFatte, prove.gare.length);
+  gara.risultato = risultato;
+  gara.completata = true;
+  prove.garaCorrente = garaIdx + 1;
+  prove.tutteComplete = prove.gare.every(g => g.completata);
+
+  const n = risultato.length;
+  risultato.forEach((r, idx) => {
+    const p = prove.punteggi[r.nomeContrada];
+    if (!p) return;
+    if (idx < 3) p.top3++;
+    else if (idx >= n - 3) p.bottom3++;
+  });
+
+  salvaCorrente();
+  renderProvePalio(tipoPalio);
+}
+
+/* Somma l'effetto delle prove sulla cifra richiesta per l'Accordo Segreto con
+   una contrada: +250 oro per ogni prova chiusa nei primi 3, -250 per ognuna
+   chiusa negli ultimi 3. */
+function offsetProvePalio(datiPalio, nomeContrada) {
+  const p = datiPalio.prove && datiPalio.prove.punteggi ? datiPalio.prove.punteggi[nomeContrada] : null;
+  if (!p) return 0;
+  return (p.top3 * 250) - (p.bottom3 * 250);
+}
+
+function renderProvePalio(tipoPalio) {
+  if (!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if (!datiPalio) return;
+
+  const prove = preparaProvePalio(tipoPalio);
+  if (!prove) { avanzaFasePalio(tipoPalio, 6); return; }
+
+  const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
+  const faseIdx = 5;
+
+  const progressHtml = FASI_PALIO.map((f, i) => `
+    <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
+  `).join('');
+
+  const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
+
+  let gareHtml = '';
+  prove.gare.forEach((gara, gIdx) => {
+    const eProssima = (gIdx === prove.garaCorrente && !gara.completata);
+    const giaFatta = gara.completata;
+
+    let corpoInterno;
+    if (giaFatta && gara.risultato) {
+      corpoInterno = gara.risultato.map((r, i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(200,153,30,.08);${r.isMe?'background:rgba(200,153,30,.06);border-radius:6px;padding-left:6px':''}">
+          <div style="font-family:var(--fn);font-size:13px;font-weight:700;color:${i===0?'var(--ocra)':i<3?'var(--ocra-l)':i>=gara.risultato.length-3?'var(--ross)':'rgba(200,153,30,.45)'};width:22px">${i+1}°</div>
+          <div style="flex:1">
+            <span style="font-family:var(--fn);font-size:12px;font-weight:${r.isMe?'700':'400'};color:${r.isMe?'var(--ocra)':'var(--perg2)'}">${r.nomeContrada}${r.isMe?' (tu)':''}</span>
+            <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.45)"> — 🐎 ${r.cavallo.nome} · 🏇 ${r.fantino.nome}</span>
+            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+          </div>
+        </div>`).join('');
+    } else if (eProssima) {
+      if (!gara.effettoScelto) {
+        corpoInterno = `
+          <div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5);margin-bottom:10px;line-height:1.6">
+            Prima di scendere in pista, scegli come preparare il cavallo per questa prova.
+          </div>
+          ${EFFETTI_PROVE_PALIO.map(e => `
+            <button class="btn ${e.costo>0?'w':'w'}" style="margin-bottom:6px;text-align:left;padding:10px 12px" onclick="scegliEffettoProvaPalio('${tipoPalio}', ${gIdx}, '${e.id}')">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <span style="font-family:var(--fn);font-size:12px;font-weight:700;color:var(--ocra-l)">${e.icona} ${e.titolo}</span>
+                <span style="font-family:var(--fn);font-size:11px;font-weight:700;color:${e.costo>0?'var(--ocra)':'rgba(200,153,30,.4)'}">${e.costo>0?`💰 ${e.costo} oro`:'gratis'}</span>
+              </div>
+              <div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.45);margin-top:3px">${e.desc}</div>
+            </button>`).join('')}
+        `;
+      } else {
+        const eff = EFFETTI_PROVE_PALIO.find(e => e.id === gara.effettoScelto);
+        corpoInterno = `
+          <div style="font-family:var(--fn);font-size:12px;color:var(--verde);margin-bottom:10px">
+            ${eff ? `${eff.icona} ${eff.titolo} applicato.` : 'Preparazione completata.'}
+          </div>
+          <button class="btn gold w" onclick="disputaProvaPalio('${tipoPalio}', ${gIdx})">🏁 Corri la Prova ${gara.numero}</button>
+        `;
+      }
+    } else {
+      corpoInterno = `<div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.28);font-style:italic">In attesa delle prove precedenti…</div>`;
+    }
+
+    gareHtml += `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Prova ${gara.numero} · 10 contrade</div>
+      ${corpoInterno}
+    </div>`;
+  });
+
+  const btnAvanti = prove.tutteComplete ? `
+    <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalio('${tipoPalio}', ${faseIdx+1})">
+      ${FASI_PALIO[faseIdx+1].icona} ${FASI_PALIO[faseIdx+1].titolo} →
+    </button>` : '';
+
+  setMain(`
+  <div>
+    <div class="hdr">
+      <span class="hdr-title">Palio di ${nomePalio} ${S.anno}</span>
+      <span class="hdr-right" style="font-size:10px;line-height:1.4">${faseIdx + 1}/${FASI_PALIO.length}<br><span style="color:rgba(200,153,30,.4)">💰 ${S.oro}</span></span>
+    </div>
+    <div class="pad fade-in">
+
+      <div style="display:flex;width:100%;margin-bottom:16px;margin-top:8px">
+        ${progressHtml}
+      </div>
+
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-size:40px;margin-bottom:6px">🏁</div>
+        <div class="screen-title">Le Prove</div>
+        <div class="screen-sub" style="margin-bottom:0">Sei corse ufficiali: cavallo e fantino sono ormai quelli che vedrai al Palio</div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">Come funziona</div>
+        <div style="font-family:var(--fn);font-size:12px;color:var(--perg2);line-height:1.7">
+          ${nomeFantinoGiocatore ? `Il tuo fantino <strong style="color:var(--ocra)">${nomeFantinoGiocatore}</strong> corre già con il cavallo assegnato alla tua Contrada.` : 'Le prove si corrono con le accoppiate ormai definitive.'}
+          Prima di ogni prova puoi scegliere un intervento sul cavallo: gli effetti sono permanenti fino a fine Palio.
+          Un buon piazzamento nelle prove (tra i primi 3) fa salire le pretese delle contrade avversarie negli Accordi Segreti; un brutto piazzamento (tra gli ultimi 3) le fa scendere.
+        </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(200,153,30,.12);display:flex;align-items:center;justify-content:between;gap:8px">
+          <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5)">Budget disponibile</span>
+          <span style="font-family:var(--fn);font-size:15px;font-weight:700;color:var(--ocra)">💰 ${S.oro} oro</span>
+        </div>
+      </div>
+
+      ${gareHtml}
+
+      ${btnAvanti}
+    </div>
+  </div>
+  `);
+}
+
 function avanzaFasePalio(tipoPalio, nuovaFase) {
   if (!S) return;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
@@ -4728,10 +5171,12 @@ function avanzaFasePalio(tipoPalio, nuovaFase) {
 }
 
 /* ═══════════════════════════════════════════════
-   CENA DELLA VIGILIA — fase 6 del Palio
+   CENA DELLA VIGILIA — fase 7 del Palio (gestita in modo generico
+   da renderFasePalio; l'indice numerico è determinato dalla
+   posizione di 'cena_vigilia' in FASI_PALIO)
    Il giocatore decide se organizzare o no la cena della vigilia.
    - Organizzata: costa 1000 oro. Guadagno = (morale contradaioli +
-     condizioni maniero) × 10 × random(0.8–1.2). Inoltre, solo per
+     condizioni società) × 10 × random(0.8–1.2). Inoltre, solo per
      questo Palio: nervosismo del cavallo -1, empatia del fantino +1
      (modifiche temporanee salvate in datiPalio.modificheTempPalio e
      valide fino alla fine di questo Palio).
@@ -4964,7 +5409,7 @@ function renderAccordiPalio(tipoPalio) {
   if (!acc) return;
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 6; // indice di 'accordi' in FASI_PALIO
+  const faseIdx = 7; // indice di 'accordi' in FASI_PALIO
 
   const progressHtml = FASI_PALIO.map((f, i) => `
     <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -4980,29 +5425,9 @@ function renderAccordiPalio(tipoPalio) {
   const cavalloContrada = assegnazioni; // nomeCavallo → nomeContrada
   Object.entries(cavalloContrada).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
 
-  // Fantini assegnati alle altre contrade: dal pool ingaggiato; usiamo esclusioneFatta/fantiniEsclusi
-  // Per semplicità generiamo fantini per ogni contrada avversaria all'inizializzazione
-  if (!datiPalio.fantiniContrade) {
-    // Il fantino ingaggiato dal giocatore non deve poter finire anche a un'altra contrada
-    const nomeFantinoGiocatore = datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null;
-    // Assegna un fantino casuale da FANTINI_DB a ogni contrada partecipante diversa dalla nostra,
-    // escludendo sempre il fantino del giocatore dal pool disponibile per le altre contrade
-    const fantiniPool = (typeof FANTINI_DB !== 'undefined')
-      ? FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore)
-      : [];
-    // Shuffle
-    for (let i = fantiniPool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [fantiniPool[i], fantiniPool[j]] = [fantiniPool[j], fantiniPool[i]];
-    }
-    datiPalio.fantiniContrade = {};
-    if (fantiniPool.length > 0) {
-      partecipanti.forEach((nc, idx) => {
-        datiPalio.fantiniContrade[nc] = fantiniPool[idx % fantiniPool.length];
-      });
-    }
-    salvaCorrente();
-  }
+  // Fantini assegnati alle altre contrade: già decisi nella schermata "Le Prove"
+  // (assicuraFantiniContrade non rigenera nulla se datiPalio.fantiniContrade esiste già)
+  assicuraFantiniContrade(tipoPalio);
 
   const boxContrade = partecipanti.map((nomeContrada, idx) => {
     const cd = CONTRADE.find(c => c.nome === nomeContrada);
@@ -5017,7 +5442,8 @@ function renderAccordiPalio(tipoPalio) {
     const haRifiutato = acc.rifiutati.includes(nomeContrada);
     const giaCoinvolta = haAccettato || haRifiutato;
 
-    const cifraBase = Math.max(50, Math.round((1500 - amicizia * 10)));
+    const offsetProve = offsetProvePalio(datiPalio, nomeContrada);
+    const cifraBase = Math.max(50, Math.round((1500 - amicizia * 10) + offsetProve));
     const cifraConsigliata = Math.round(cifraBase * 1.3);
 
     // Dati cavallo (risultati tratta e corse)
@@ -5069,6 +5495,7 @@ function renderAccordiPalio(tipoPalio) {
             <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.42)">Cifra consigliata</span>
             <span style="font-family:var(--fn);font-size:12px;font-weight:700;color:var(--ocra)">💰 ${cifraConsigliata} oro</span>
           </div>
+          ${offsetProve !== 0 ? `<div style="font-family:var(--fn);font-size:10px;color:${offsetProve>0?'var(--ross)':'var(--verde)'};margin-bottom:6px">${offsetProve>0?'📈':'📉'} Pretese ${offsetProve>0?'aumentate':'ridotte'} dalle prove: ${offsetProve>0?'+':''}${offsetProve} oro</div>` : ''}
           <div style="display:flex;gap:8px">
             <input id="INP_ACC_${idx}" class="inp" type="number" min="1" max="${S.oro}" inputmode="numeric"
                    placeholder="es. ${cifraConsigliata}" style="flex:1;width:auto;min-width:0;padding:10px 12px;font-size:14px">
@@ -5154,7 +5581,7 @@ function renderAccordiPalio(tipoPalio) {
           🚫 Nessun accordo →
         </button>
         ${(tuttiDecisi || acc.accettati.length > 0 || acc.rifiutati.length > 0) ? `
-        <button class="btn gold w" style="flex:1;margin-top:0" onclick="avanzaFasePalio('${tipoPalio}', 7)">
+        <button class="btn gold w" style="flex:1;margin-top:0" onclick="avanzaFasePalio('${tipoPalio}', 8)">
           🗺️ Vai alla Tattica →
         </button>` : `
         <button class="btn gold" style="flex:1;padding:13px 8px;min-height:0;opacity:.4;pointer-events:none;border-radius:10px">
@@ -5187,7 +5614,8 @@ function faiOffertaAccordoPalio(tipoPalio, nomeContrada, idx) {
   }
 
   const amicizia = (S.amicizia && S.amicizia[nomeContrada] !== undefined) ? S.amicizia[nomeContrada] : 50;
-  const base = 1500 - amicizia * 10;
+  const offsetProve = offsetProvePalio(datiPalio, nomeContrada);
+  const base = 1500 - amicizia * 10 + offsetProve;
   const fattore = 0.8 + Math.random() * 0.4;
   const soglia = Math.max(0, Math.round(base * fattore));
 
@@ -5238,11 +5666,11 @@ function mostraPopupRisultatoAccordoPalio(titolo, corpo, tipoPalio) {
 }
 
 function saltoAccordiPalio(tipoPalio) {
-  avanzaFasePalio(tipoPalio, 7);
+  avanzaFasePalio(tipoPalio, 8);
 }
 
 /* ═══════════════════════════════════════════════
-   TATTICA DI GARA — fase (indice 7)
+   TATTICA DI GARA — fase (indice 8)
    Istruzioni tattiche al fantino prima della Carriera.
    Il fantino accetta con probabilità = intesa/100.
    Se accetta: modifiche temporanee al cavallo del giocatore
@@ -5301,7 +5729,7 @@ function renderTatticaPalio(tipoPalio) {
   if (!datiPalio) return;
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 7;
+  const faseIdx = 8;
 
   const progressHtml = FASI_PALIO.map((f, i) => `
     <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -5362,8 +5790,8 @@ function renderTatticaPalio(tipoPalio) {
       </div>
       <div style="font-family:var(--fn);font-size:14px;font-weight:700;color:var(--ocra-l);margin-bottom:4px">${t ? t.icona + ' ' + t.titolo : tatticaScelta.id}</div>
       <div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5);line-height:1.6">${esito ? 'Il fantino ha eseguito gli ordini del capitano.' : 'Il fantino ha ignorato gli ordini. Intesa −10.'}</div>
-      <button class="btn gold w" style="margin-top:12px" onclick="avanzaFasePalio('${tipoPalio}', 8)">
-        🎯 ${FASI_PALIO[8].titolo} →
+      <button class="btn gold w" style="margin-top:12px" onclick="avanzaFasePalio('${tipoPalio}', 9)">
+        🎯 ${FASI_PALIO[9].titolo} →
       </button>
     </div>`;
   }
@@ -5415,7 +5843,7 @@ function renderTatticaPalio(tipoPalio) {
       ${!tatticaScelta ? `
       <div style="font-family:var(--fn);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:rgba(200,153,30,.38);margin-bottom:10px">Scegli la tattica</div>
       ${bottoneTattiche}
-      <button class="btn w" style="margin-top:4px" onclick="avanzaFasePalio('${tipoPalio}', 8)">
+      <button class="btn w" style="margin-top:4px" onclick="avanzaFasePalio('${tipoPalio}', 9)">
         Senza istruzioni — vai al canapo →
       </button>` : ''}
     </div>
@@ -5591,7 +6019,7 @@ function renderCanapoPalio(tipoPalio) {
 
   const canapo = preparaCanapoPalio(tipoPalio);
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 8;
+  const faseIdx = 9;
 
   const progressHtml = FASI_PALIO.map((f, i) => `
     <div style="width:${100/FASI_PALIO.length - 1}%;height:4px;border-radius:2px;background:${i <= faseIdx ? 'var(--ocra)' : 'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -5979,7 +6407,7 @@ function renderSpionaggioContrade(){
     </div>
     <div class="pad fade-in">
       <div class="screen-title" style="margin-top:8px">🕵️ Manda una Spia</div>
-      <div class="screen-sub">Scegli la contrada da spiare. Dovrai attraversare il loro maniero senza farti scoprire dalle guardie.</div>
+      <div class="screen-sub">Scegli la contrada da spiare. Dovrai attraversare la loro società senza farti scoprire dalle guardie.</div>
       <div class="card">
         <div class="card-title">Scegli la Contrada</div>
         ${righeHtml}
@@ -6292,7 +6720,7 @@ function renderMinigiocoSpionaggio(){
       <span class="hdr-right" style="font-size:10px">💰 ${S.oro}</span>
     </div>
     <div class="pad fade-in">
-      <div class="screen-title" style="margin-top:8px">🕵️ Infiltrati nel Maniero</div>
+      <div class="screen-title" style="margin-top:8px">🕵️ Infiltrati nella Società</div>
       <div class="screen-sub">Raggiungi il punto verde di uscita senza farti toccare dalle guardie rosse. Le guardie accelerano col tempo: fai in fretta!</div>
       <div class="card" style="text-align:center;padding:14px">
         <div style="position:relative;width:${size*cellPx}px;height:${size*cellPx}px;margin:0 auto;background:rgba(0,0,0,.25);border:1px solid rgba(200,153,30,.3)">
@@ -6418,15 +6846,15 @@ function renderManiero(){
   <div>
     <div class="hdr">
       <button class="hdr-back" onclick="renderGiocoCapitano()">‹</button>
-      <span class="hdr-title">Maniero</span>
+      <span class="hdr-title">Società</span>
       <span class="hdr-right" style="font-size:10px">${S.contrada.nome}<br><span style="color:rgba(200,153,30,.38)">${MESI_CAPITANO[S.mese-1]} ${S.anno}</span></span>
     </div>
     <div class="pad fade-in">
-      <div class="screen-title" style="margin-top:8px">🏰 Maniero</div>
+      <div class="screen-title" style="margin-top:8px">🏰 Società</div>
       <div class="screen-sub">La sede della Contrada del${/^[AEIOU]/.test(S.contrada.nome)?'l\'':' '}${S.contrada.nome}</div>
 
       <div class="card">
-        <div class="card-title">Stato del Maniero</div>
+        <div class="card-title">Stato della Società</div>
 
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;margin-bottom:5px">
@@ -6440,7 +6868,7 @@ function renderManiero(){
 
         <div>
           <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-            <div style="font-family:var(--fn);font-size:12px;color:var(--ocra-l);font-weight:700">🏛️ Condizioni del Maniero</div>
+            <div style="font-family:var(--fn);font-size:12px;color:var(--ocra-l);font-weight:700">🏛️ Condizioni della Società</div>
             <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.55);font-weight:700">${m.condizioni}</div>
           </div>
           <div style="width:100%;height:9px;border-radius:5px;background:rgba(255,255,255,.06);overflow:hidden;border:1px solid rgba(200,153,30,.15)">
@@ -6482,7 +6910,7 @@ function renderManiero(){
       <button class="sec-btn" ${usataManutenzione?'disabled':''} onclick="eseguiManutenzioneManiero()">
         <span class="sec-btn-icon">🔨</span>
         <div>
-          <div class="sec-btn-label">Manutenzione del maniero${usataManutenzione?' · fatto questo mese':''}</div>
+          <div class="sec-btn-label">Manutenzione della Società${usataManutenzione?' · fatto questo mese':''}</div>
           <div class="sec-btn-sub">Costo: ${S.contrada?.bonusKey==='manutenzione_400'?S.contrada.bonusVal:MANIERO_AZIONI.manutenzione.costo} oro · +20 condizioni, +5 morale${S.contrada?.bonusKey==='manutenzione_400'?' 🌊 Bonus Onda':''}</div>
         </div>
         <span class="sec-btn-chev">${usataManutenzione?'✓':'›'}</span>
@@ -6525,7 +6953,7 @@ function eseguiCenaManiero(){
   m.azioniUsateMese.cena = true;
   if(!S._storicoAzioni) S._storicoAzioni = {};
   S._storicoAzioni.cena = true;
-  S.log.push(`Cena organizzata nel maniero: -${costoCena} oro di spesa, +${guadagno} oro di guadagno.`);
+  S.log.push(`Cena organizzata nella società: -${costoCena} oro di spesa, +${guadagno} oro di guadagno.`);
   verificaObiettivi();
   salvaCorrente();
   mostraPopupRisultatoManiero('🍷 Cena Organizzata', `La cena è stata un successo tra i contradaioli.<br><br>Spesa: <strong style="color:var(--ross)">-${costoCena} oro</strong><br>Guadagno: <strong style="color:var(--verde)">+${guadagno} oro</strong>`, 'renderManiero');
@@ -6565,10 +6993,10 @@ function eseguiEventoManiero(){
   m.azioniUsateMese.evento = true;
   if(!S._storicoAzioni) S._storicoAzioni = {};
   S._storicoAzioni.evento = true;
-  S.log.push(`Evento organizzato per la contrada: -${MANIERO_AZIONI.evento.costo} oro, -5 condizioni maniero, +${aumentoMorale} morale.`);
+  S.log.push(`Evento organizzato per la contrada: -${MANIERO_AZIONI.evento.costo} oro, -5 condizioni società, +${aumentoMorale} morale.`);
   verificaObiettivi();
   salvaCorrente();
-  mostraPopupRisultatoManiero('🎉 Evento Organizzato', `I contradaioli hanno festeggiato con entusiasmo.<br><br>Spesa: <strong style="color:var(--ross)">-${MANIERO_AZIONI.evento.costo} oro</strong><br>Morale: <strong style="color:var(--verde)">+${aumentoMorale}</strong><br>Condizioni maniero: <strong style="color:var(--ross)">-5</strong>`, 'renderManiero');
+  mostraPopupRisultatoManiero('🎉 Evento Organizzato', `I contradaioli hanno festeggiato con entusiasmo.<br><br>Spesa: <strong style="color:var(--ross)">-${MANIERO_AZIONI.evento.costo} oro</strong><br>Morale: <strong style="color:var(--verde)">+${aumentoMorale}</strong><br>Condizioni società: <strong style="color:var(--ross)">-5</strong>`, 'renderManiero');
 }
 
 /* ── Manutenzione: costo 500 (400 per Onda), condizioni +20, morale +5 ── */
@@ -6578,14 +7006,14 @@ function eseguiManutenzioneManiero(){
   if(m.azioniUsateMese.manutenzione) return;
   const costoMan = S.contrada?.bonusKey === 'manutenzione_400' ? S.contrada.bonusVal : MANIERO_AZIONI.manutenzione.costo;
   if(S.oro < costoMan){
-    mostraPopupErrore('Oro insufficiente', `La manutenzione del maniero costa ${costoMan} oro. Al momento ne possiedi ${S.oro}.`);
+    mostraPopupErrore('Oro insufficiente', `La manutenzione della società costa ${costoMan} oro. Al momento ne possiedi ${S.oro}.`);
     return;
   }
   S.oro -= costoMan;
   m.condizioni = Math.min(100, m.condizioni + 20);
   m.morale = Math.min(100, m.morale + 5);
   m.azioniUsateMese.manutenzione = true;
-  S.log.push(`Manutenzione del maniero: -${costoMan} oro, +20 condizioni, +5 morale.`);
+  S.log.push(`Manutenzione della società: -${costoMan} oro, +20 condizioni, +5 morale.`);
   verificaObiettivi();
   salvaCorrente();
   renderManiero();
@@ -7816,7 +8244,7 @@ function renderGiocoFantino(){
 }
 
 /* ── Avanzamento del tempo (carriera Fantino): Gennaio → Agosto, poi nuovo anno.
-   Stessa struttura della carriera Capitano, ma senza maniero, bonus di contrada,
+   Stessa struttura della carriera Capitano, ma senza società, bonus di contrada,
    né cena della vigilia: qui contano solo fama, oro, vittorie ed i rapporti del fantino. ── */
 function avanzaMeseFantino(){
   if(!S) return;
@@ -9755,6 +10183,7 @@ const FASI_PALIO_FANTINO = [
   { id:'presentazione',        titolo:'Presentazione del Lotto',     icona:'📜', descrizione:'Il Comune di Siena presenta ufficialmente i dieci cavalli scelti dalle contrade.' },
   { id:'assegnazione',         titolo:'Assegnazione Cavalli',        icona:'✅', descrizione:'I cavalli del lotto vengono abbinati a sorte alle dieci contrade partecipanti.' },
   { id:'offerte',              titolo:'Offerte delle Contrade',      icona:'💰', descrizione:'Le contrade senza fantino si fanno avanti con offerte per ingaggiarti.' },
+  { id:'prove',                titolo:'Le Prove',                    icona:'🏇', descrizione:'Sei corse di prova in Piazza del Campo con le accoppiate ufficiali di cavallo e fantino.' },
   { id:'accordi_contrade',     titolo:'Accordi con le Contrade',     icona:'🗺️', descrizione:'Trattative segrete con le altre contrade per favorire il tuo passaggio in Piazza.' },
   { id:'accordi_fantini',      titolo:'Accordi tra Fantini',         icona:'🤝', descrizione:'Patti e promesse scambiati con i colleghi fantini delle altre contrade.' },
   { id:'istruzioni_capitano',  titolo:'Istruzioni del Capitano',     icona:'⚔️', descrizione:'Il capitano della tua contrada ti impartisce le ultime istruzioni tattiche.' },
@@ -9796,6 +10225,7 @@ function renderFasePalioFantino(tipoPalio, faseIdx){
   if(fase.id === 'presentazione'){ renderPresentazioneLottoFantino(tipoPalio); return; }
   if(fase.id === 'assegnazione'){ renderAssegnazioneCavalliFantino(tipoPalio); return; }
   if(fase.id === 'offerte'){ renderOffertePalioFantino(tipoPalio); return; }
+  if(fase.id === 'prove'){ renderProvePalioFantino(tipoPalio); return; }
   if(fase.id === 'accordi_contrade'){ renderAccordiContradeFantino(tipoPalio); return; }
   if(fase.id === 'accordi_fantini'){ renderAccordiFantiniRivali(tipoPalio); return; }
   if(fase.id === 'istruzioni_capitano'){ renderIstruzioniCapitanoFantino(tipoPalio); return; }
@@ -10369,8 +10799,8 @@ function renderOffertePalioFantino(tipoPalio){
             <span style="color:rgba(200,153,30,.32)">Non parteciperai al Palio di ${nomePalio} ${S.anno} in sella. Coltiva l'intesa con le contrade per le prossime occasioni.</span>
           </div>
         </div>
-        <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 10)">
-          ${FASI_PALIO_FANTINO[10].icona} ${FASI_PALIO_FANTINO[10].titolo} →
+        <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 11)">
+          ${FASI_PALIO_FANTINO[11].icona} ${FASI_PALIO_FANTINO[11].titolo} →
         </button>
       </div>
     </div>
@@ -10495,6 +10925,346 @@ function accettaOffertaContradaFantino(tipoPalio, nomeContrada){
 }
 
 /* ═══════════════════════════════════════════════
+   LE PROVE — Carriera Fantino
+   Sei corse di prova in Piazza del Campo (pista "alla senese"), disputate con
+   le accoppiate ufficiali cavallo/fantino di ogni contrada: lo stesso cavallo
+   assegnato per il Palio (fase Assegnazione) e lo stesso fantino che si vedrà
+   nella schermata "Accordi tra Fantini" (l'abbinamento viene fissato fin da
+   ora richiamando preparaAccordiFantiniRivali, e poi riusato senza cambiare).
+   Prima di ogni prova il giocatore può scegliere un solo intervento tra i 5
+   disponibili (o correre senza modifiche): l'effetto si somma a quelli già
+   scelti nelle prove precedenti e resta valido fino a fine Palio (si applica
+   anche alla corsa vera e propria, vedi preparaCorsaPalioFantino).
+   Il piazzamento del giocatore e di ogni contrada rivale in ciascuna prova
+   viene conteggiato (prime tre / ultime tre): questi conteggi modificano poi
+   le cifre delle fasi successive (vedi preparaAccordiContradeFantino e
+   renderAccordiFantiniRivali/offriAccordoFantinoRivale): +250 oro per ogni
+   prova tra le prime tre, −250 oro per ogni prova tra le ultime tre.
+═══════════════════════════════════════════════ */
+const BONUS_ORO_PER_PROVA_TOP3 = 250;
+const MALUS_ORO_PER_PROVA_BOTTOM3 = 250;
+
+const EFFETTI_PROVE_FANTINO = [
+  { id:'ferratura',     titolo:'Nuova ferratura',         icona:'🔨', costo:500,
+    dettaglio:'Tenuta curva <strong style="color:var(--verde)">+0,5</strong> fino a fine Palio',
+    effetto:{ tenuta_curva:0.5 } },
+  { id:'san_martino',   titolo:'Prova forte San Martino',  icona:'💨', costo:0,
+    dettaglio:'Velocità <strong style="color:var(--verde)">+0,5</strong> · Tenuta curva <strong style="color:var(--ross)">−0,5</strong> fino a fine Palio',
+    effetto:{ velocita:0.5, tenuta_curva:-0.5 } },
+  { id:'solo_partenza', titolo:'Prova solo la partenza',   icona:'🚀', costo:0,
+    dettaglio:'Accelerazione <strong style="color:var(--verde)">+0,5</strong> · Resistenza <strong style="color:var(--ross)">−0,5</strong> fino a fine Palio',
+    effetto:{ accelerazione:0.5, resistenza:-0.5 } },
+  { id:'buon_ritmo',    titolo:'Buon ritmo',               icona:'🏃', costo:0,
+    dettaglio:'Resistenza <strong style="color:var(--verde)">+0,5</strong> · Velocità <strong style="color:var(--ross)">−0,5</strong> fino a fine Palio',
+    effetto:{ resistenza:0.5, velocita:-0.5 } },
+  { id:'carte_coperte', titolo:'Gioca a carte coperte',    icona:'🎭', costo:0,
+    dettaglio:'Arrivi tra gli ultimi in questa prova, così le altre contrade non ti considerano un pericolo · Nervosismo <strong style="color:var(--ross)">+0,5</strong> fino a fine Palio',
+    effetto:{ nervosismo:0.5 }, nascondi:true }
+];
+
+/* Somma l'effetto delle Prove sulla cifra di un accordo (con una contrada o con un
+   fantino rivale): +250 oro per ogni prova conclusa tra le prime tre da quella
+   contrada, -250 oro per ogni prova conclusa tra le ultime tre. */
+function bonusProveContradaFantino(datiPalio, nomeContrada){
+  const conti = (datiPalio.proveFantino && datiPalio.proveFantino.conti) ? datiPalio.proveFantino.conti[nomeContrada] : null;
+  if(!conti) return 0;
+  return (conti.top3 * BONUS_ORO_PER_PROVA_TOP3) - (conti.bottom3 * MALUS_ORO_PER_PROVA_BOTTOM3);
+}
+
+function preparaProvePalioFantino(tipoPalio){
+  if(!S) return null;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.partecipanti || !datiPalio.contradaFantino) return null;
+
+  // Fissa fin da ora l'abbinamento fantino-contrada rivale: sarà lo stesso
+  // che si vedrà più avanti nella schermata "Accordi tra Fantini".
+  if(typeof preparaAccordiFantiniRivali === 'function') preparaAccordiFantiniRivali(tipoPalio);
+
+  if(!datiPalio.proveFantino){
+    const conti = {};
+    datiPalio.partecipanti.forEach(n => { conti[n] = { top3:0, bottom3:0 }; });
+    datiPalio.proveFantino = {
+      gare: Array.from({ length:6 }, (_,i) => ({ numero:i+1, completata:false, effetto:null, risultato:null })),
+      garaCorrente: 0,
+      tutteComplete: false,
+      effetti: { velocita:0, accelerazione:0, tenuta_curva:0, resistenza:0, nervosismo:0 },
+      conti
+    };
+    salvaCorrente();
+  }
+  return datiPalio.proveFantino;
+}
+
+/* Costruisce le 10 coppie contrada/cavallo/fantino per una prova, applicando al
+   cavallo del giocatore la somma degli effetti scelti fino a questo momento. */
+function costruisciCoppieProveFantino(tipoPalio){
+  if(!S) return [];
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.proveFantino || !datiPalio.partecipanti) return [];
+
+  const contradaGiocatore = datiPalio.contradaFantino;
+  const assegnazione = preparaAssegnazioneCavalli(tipoPalio);
+  const contradaCavallo = {};
+  Object.entries((assegnazione && assegnazione.assegnazioni) || {}).forEach(([cav,con]) => { contradaCavallo[con] = cav; });
+  const fantiniRivali = datiPalio.fantiniRivaliAccordi || {};
+  const eff = datiPalio.proveFantino.effetti;
+
+  return datiPalio.partecipanti.map(nomeContrada => {
+    const isMe = nomeContrada === contradaGiocatore;
+    const nomeCav = contradaCavallo[nomeContrada];
+
+    let cavBase = null;
+    if(nomeCav && isMe && S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCav)){
+      const st = statoVivoCavallo(nomeCav);
+      if(st) cavBase = Object.assign({ nome:nomeCav }, st);
+    }
+    if(!cavBase && nomeCav && typeof CAVALLI_DB !== 'undefined'){
+      cavBase = CAVALLI_DB.find(c => c.nome === nomeCav) || null;
+    }
+    if(!cavBase) cavBase = { nome: nomeCav || 'Cavallo', velocita:3, accelerazione:3, tenuta_curva:3, resistenza:3, nervosismo:2 };
+
+    const cavallo = Object.assign({}, cavBase);
+    if(isMe){
+      cavallo.velocita      = Math.max(1, (cavallo.velocita      || 3) + (eff.velocita      || 0));
+      cavallo.accelerazione = Math.max(1, (cavallo.accelerazione || 3) + (eff.accelerazione || 0));
+      cavallo.tenuta_curva  = Math.max(1, (cavallo.tenuta_curva  || 3) + (eff.tenuta_curva  || 0));
+      cavallo.resistenza    = Math.max(1, (cavallo.resistenza    || 3) + (eff.resistenza    || 0));
+      cavallo.nervosismo    = Math.max(1, (cavallo.nervosismo    || 2) + (eff.nervosismo    || 0));
+    }
+
+    let fantino;
+    if(isMe){
+      fantino = { nome:'Tu', bravura:S.bravura||1, esperienza:S.esperienza||1, gestione_mossa:S.gestioneMossa||1, empatia:S.empatia||1 };
+    } else {
+      const nomeFan = fantiniRivali[nomeContrada];
+      const f = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nomeFan) : null;
+      fantino = f || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
+    }
+
+    return { nomeContrada, cavallo, fantino, giocatore: isMe };
+  });
+}
+
+/* Simula una prova mantenendo il nome della contrada in ogni risultato
+   (simulaGara non lo farebbe, essendo condivisa con altre schermate). */
+function simulaProvaFantino(coppie, pista){
+  const risultati = coppie.map(c => {
+    const r = simulaCorsaCoppia(c.cavallo, c.fantino, pista, c.bonusVelocitaMossa);
+    return { nomeContrada:c.nomeContrada, cavallo:c.cavallo, fantino:c.fantino, tempo:r.tempo, caduta:r.caduta, giocatore:!!c.giocatore };
+  });
+  // Anche qui: le accoppiate papabili per il podio giocano coperto nelle prove
+  // (stessa logica della Carriera Capitano, vedi applicaGiocoCopertoProve).
+  return applicaGiocoCopertoProve(risultati, coppie);
+}
+
+function scegliEffettoProvaFantino(tipoPalio, effettoId){
+  if(!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.proveFantino) return;
+  const prove = datiPalio.proveFantino;
+  const garaIdx = prove.garaCorrente;
+  const gara = prove.gare[garaIdx];
+  if(!gara || gara.completata) return;
+
+  const def = EFFETTI_PROVE_FANTINO.find(e => e.id === effettoId);
+  if(!def) return;
+
+  if(def.costo > 0){
+    if((S.oro||0) < def.costo){
+      mostraPopupErrore('Oro insufficiente', `Questo intervento costa ${def.costo} oro. Al momento ne possiedi ${S.oro}.`);
+      return;
+    }
+    S.oro -= def.costo;
+  }
+
+  Object.entries(def.effetto).forEach(([k,v]) => { prove.effetti[k] = (prove.effetti[k] || 0) + v; });
+  gara.effetto = effettoId;
+  S.log.push(`Prova ${gara.numero}: scelto "${def.titolo}"${def.costo>0?` (-${def.costo} oro)`:''}.`);
+  salvaCorrente();
+  avviaMinigiocoMossaProvaFantino(tipoPalio, garaIdx);
+}
+
+function saltaEffettoProvaFantino(tipoPalio){
+  if(!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.proveFantino) return;
+  const garaIdx = datiPalio.proveFantino.garaCorrente;
+  const gara = datiPalio.proveFantino.gare[garaIdx];
+  if(!gara || gara.completata) return;
+  avviaMinigiocoMossaProvaFantino(tipoPalio, garaIdx);
+}
+
+function avviaMinigiocoMossaProvaFantino(tipoPalio, garaIdx){
+  if(!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.proveFantino) return;
+  const gara = datiPalio.proveFantino.gare[garaIdx];
+  if(!gara || gara.completata) return;
+
+  const coppie = costruisciCoppieProveFantino(tipoPalio);
+  const { velocita, ampiezzaZona } = calcolaDifficoltaMossa(coppie);
+  window._mossaState = {
+    contesto: 'provaFantino',
+    tipoPalio, garaIdx,
+    velocita, ampiezzaZona,
+    centroObiettivo: 50,
+    posizione: 0, direzione: 1, fermata: false, timerId: null
+  };
+  renderMinigiocoMossa();
+  avviaTickMossa();
+}
+
+function disputaProvaFantino(tipoPalio, garaIdx, bonusVelocitaMossa){
+  if(!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.proveFantino) return;
+  const prove = datiPalio.proveFantino;
+  const gara = prove.gare[garaIdx];
+  if(!gara || gara.completata) return;
+
+  const coppie = costruisciCoppieProveFantino(tipoPalio);
+  coppie.forEach(c => { if(c.giocatore) c.bonusVelocitaMossa = bonusVelocitaMossa; });
+
+  const gareGiaFatte = prove.gare.filter(g => g.completata);
+  let risultato = evitaSweepTotaleProve(simulaProvaFantino(coppie, PISTE_PROVINCIA.senese), gareGiaFatte, prove.gare.length);
+
+  // "Gioca a carte coperte": il giocatore nasconde il suo valore, arrivando
+  // forzatamente tra le ultime tre posizioni di questa prova.
+  if(gara.effetto === 'carte_coperte'){
+    const n = risultato.length;
+    const idxGiocatore = risultato.findIndex(r => r.giocatore);
+    if(idxGiocatore > -1 && idxGiocatore < n - 3){
+      const [entry] = risultato.splice(idxGiocatore, 1);
+      const posizioneForzata = Math.min(risultato.length, n - 3 + Math.floor(Math.random()*3));
+      risultato.splice(posizioneForzata, 0, entry);
+    }
+  }
+
+  gara.risultato = risultato;
+  gara.completata = true;
+
+  // Aggiorna il conteggio "prime tre / ultime tre" per ogni contrada
+  const n = risultato.length;
+  risultato.forEach((r, i) => {
+    const conti = prove.conti[r.nomeContrada];
+    if(!conti) return;
+    if(i < 3) conti.top3++;
+    if(i >= n - 3) conti.bottom3++;
+  });
+
+  const posizioneGiocatore = risultato.findIndex(r => r.giocatore);
+  if(posizioneGiocatore > -1){
+    S.log.push(`Prova ${gara.numero}: concluso ${posizioneGiocatore+1}° su ${n}.`);
+  }
+
+  prove.garaCorrente = garaIdx + 1;
+  prove.tutteComplete = prove.gare.every(g => g.completata);
+
+  salvaCorrente();
+  renderProvePalioFantino(tipoPalio);
+}
+
+function renderProvePalioFantino(tipoPalio){
+  if(!S) return;
+  const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
+  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 3); return; }
+
+  const prove = preparaProvePalioFantino(tipoPalio);
+  if(!prove){ avanzaFasePalioFantino(tipoPalio, 3); return; }
+
+  const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
+  const faseIdx = 4;
+
+  const progressHtml = FASI_PALIO_FANTINO.map((f,i) => `
+    <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i<=faseIdx?'var(--ocra)':'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
+  `).join('');
+
+  let gareHtml = '';
+  prove.gare.forEach((gara, gIdx) => {
+    const eProssima = (gIdx === prove.garaCorrente && !gara.completata);
+    const giaFatta = gara.completata;
+
+    let corpo;
+    if(giaFatta && gara.risultato){
+      const n = gara.risultato.length;
+      const righeRisultato = gara.risultato.map((r,i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(200,153,30,.08)">
+          <div style="font-family:var(--fn);font-size:13px;font-weight:700;color:${i===0?'var(--ocra)':'rgba(200,153,30,.45)'};width:22px">${i+1}°</div>
+          <div style="flex:1">
+            <span style="font-family:var(--fn);font-size:12px;font-weight:${r.giocatore?'700':(i===0?'700':'400')};color:${r.giocatore?'var(--verde)':(i===0?'var(--ocra-l)':'var(--perg2)')}">🏛️ ${r.nomeContrada}</span>
+            <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.4)"> — 🐎 ${(r.cavallo && r.cavallo.nome) || 'Cavallo'} · 🏇 ${r.giocatore?'<strong style="color:var(--verde)">tu</strong>':r.fantino.nome}</span>
+            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+          </div>
+        </div>`).join('');
+      const effDef = gara.effetto ? EFFETTI_PROVE_FANTINO.find(e => e.id === gara.effetto) : null;
+      corpo = `
+        ${effDef ? `<div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);margin-bottom:6px;font-style:italic">${effDef.icona} Intervento scelto: ${effDef.titolo}</div>` : ''}
+        <div style="font-family:var(--fn);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,153,30,.38);margin-bottom:8px">Ordine d'arrivo</div>
+        ${righeRisultato}`;
+    } else if(eProssima){
+      const bottoniEffetti = EFFETTI_PROVE_FANTINO.map(e => `
+        <button class="btn w" style="margin-top:6px;padding:10px 12px" onclick="scegliEffettoProvaFantino('${tipoPalio}','${e.id}')">
+          <div style="width:100%;max-width:100%;text-align:center">
+            <div style="font-family:var(--fn);font-size:12px;font-weight:700;color:var(--ocra-l)">${e.icona} ${e.titolo}${e.costo>0?` · 💰 ${e.costo} oro`:''}</div>
+            <div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.55);margin-top:2px;line-height:1.5">${e.dettaglio}</div>
+          </div>
+        </button>`).join('');
+      corpo = `
+        <div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.55);margin-bottom:8px">Scegli un intervento prima di correre questa prova, oppure corri senza modifiche:</div>
+        ${bottoniEffetti}
+        <button class="btn gold w" style="margin-top:10px" onclick="saltaEffettoProvaFantino('${tipoPalio}')">🏁 Corri la Prova ${gara.numero} senza modifiche</button>
+      `;
+    } else {
+      corpo = `<div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.28);font-style:italic;margin-top:4px">In attesa delle prove precedenti…</div>`;
+    }
+
+    gareHtml += `
+    <div class="card" style="margin-bottom:12px;${eProssima?'border:1px solid rgba(200,153,30,.45)':''}">
+      <div class="card-title">Prova ${gara.numero} di 6</div>
+      ${corpo}
+    </div>`;
+  });
+
+  const etichetteEffetti = { velocita:'Velocità', accelerazione:'Accelerazione', tenuta_curva:'Tenuta curva', resistenza:'Resistenza', nervosismo:'Nervosismo' };
+  const effAttiviHtml = Object.entries(prove.effetti).filter(([,v]) => v).map(([k,v]) => {
+    const positivo = v > 0;
+    return `<span style="font-family:var(--fn);font-size:10px;color:${positivo?'var(--verde)':'var(--ross)'};background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:3px 4px 0 0">${etichetteEffetti[k]||k} ${positivo?'+':''}${v}</span>`;
+  }).join('');
+
+  const btnAvanti = prove.tutteComplete ? `
+    <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 5)">
+      ${FASI_PALIO_FANTINO[5].icona} ${FASI_PALIO_FANTINO[5].titolo} →
+    </button>` : '';
+
+  setMain(`
+  <div>
+    <div class="hdr">
+      <span class="hdr-title">Palio di ${nomePalio} ${S.anno}</span>
+      <span class="hdr-right" style="font-size:10px">${faseIdx+1}/${FASI_PALIO_FANTINO.length}<br><span style="color:rgba(200,153,30,.4)">💰 ${S.oro}</span></span>
+    </div>
+    <div class="pad fade-in">
+      <div style="display:flex;width:100%;margin-bottom:16px;margin-top:8px">${progressHtml}</div>
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:48px;margin-bottom:8px">🏇</div>
+        <div class="screen-title">Le Prove</div>
+        <div class="screen-sub" style="margin-bottom:0">Sei corse di prova in Piazza del Campo con le accoppiate ufficiali</div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-title">Come funziona</div>
+        <div style="font-family:var(--fn);font-size:12px;color:var(--perg2);line-height:1.8">
+          Ogni contrada corre con il cavallo assegnatole per il Palio e il fantino che la monterà davvero (lo stesso che rivedrai negli Accordi tra Fantini). Prima di ogni prova puoi scegliere un intervento sul tuo cavallo: gli effetti si sommano a quelli già scelti e restano validi fino a fine Palio.<br><br>
+          Le prestazioni nelle prove non passano inosservate: per ogni prova chiusa tra le prime tre, le offerte delle contrade rivali e le richieste dei fantini rivali <strong style="color:var(--verde)">aumentano di ${BONUS_ORO_PER_PROVA_TOP3} oro</strong>; per ogni prova chiusa tra le ultime tre <strong style="color:var(--ross)">diminuiscono di ${MALUS_ORO_PER_PROVA_BOTTOM3} oro</strong>.
+        </div>
+        ${effAttiviHtml ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(200,153,30,.12)"><div style="font-family:var(--fn);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:rgba(200,153,30,.32);margin-bottom:5px">Effetti attivi sul tuo cavallo</div>${effAttiviHtml}</div>` : ''}
+      </div>
+      ${gareHtml}
+      ${btnAvanti}
+    </div>
+  </div>
+  `);
+}
+
+/* ═══════════════════════════════════════════════
    ACCORDI CON LE CONTRADE — Carriera Fantino
    Ognuna delle contrade in Piazza (escluso il colore per cui il giocatore corre)
    può proporre un accordo segreto per fargli sbagliare la mossa apposta. La
@@ -10517,6 +11287,9 @@ function preparaAccordiContradeFantino(tipoPalio){
 
   if(!datiPalio.accordiContradeFantino){
     const mediaFantino = ((S.bravura||1) + (S.esperienza||1) + (S.gestioneMossa||1) + (S.empatia||1)) / 4;
+    // Le prestazioni del giocatore nelle Prove influenzano la cifra delle offerte:
+    // +250 oro per ogni prova conclusa tra le prime tre, -250 per ogni prova tra le ultime tre.
+    const bonusProve = bonusProveContradaFantino(datiPalio, contradaGiocatore);
     const offerte = {};
     datiPalio.partecipanti.forEach(nomeContrada => {
       if(nomeContrada === contradaGiocatore) return;
@@ -10525,7 +11298,7 @@ function preparaAccordiContradeFantino(tipoPalio){
       let offerta = 0;
       if(attiva){
         const fattoreRandom = 0.8 + Math.random() * 0.4;
-        offerta = Math.round(mediaFantino * 150 * fattoreRandom);
+        offerta = Math.max(0, Math.round(mediaFantino * 150 * fattoreRandom) + bonusProve);
       }
       offerte[nomeContrada] = { intesa, attiva, offerta };
     });
@@ -10542,7 +11315,7 @@ function renderAccordiContradeFantino(tipoPalio){
 
   const offerte = preparaAccordiContradeFantino(tipoPalio);
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 4;
+  const faseIdx = 5;
   const contradaGiocatore = datiPalio.contradaFantino;
   const accordoAttivo = datiPalio.accordoMossaFantino || null;
 
@@ -10611,8 +11384,8 @@ function renderAccordiContradeFantino(tipoPalio){
         </div>
       </div>
       ${boxHtml}
-      <button class="btn ${accordoAttivo?'gold':''} w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 5)">
-        ${accordoAttivo ? '🤝' : '🚫'} ${FASI_PALIO_FANTINO[5].icona} ${FASI_PALIO_FANTINO[5].titolo} →
+      <button class="btn ${accordoAttivo?'gold':''} w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 6)">
+        ${accordoAttivo ? '🤝' : '🚫'} ${FASI_PALIO_FANTINO[6].icona} ${FASI_PALIO_FANTINO[6].titolo} →
       </button>
     </div>
   </div>
@@ -10716,13 +11489,13 @@ function renderAccordiFantiniRivali(tipoPalio){
   if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 3); return; }
 
   const prep = preparaAccordiFantiniRivali(tipoPalio);
-  if(!prep){ avanzaFasePalioFantino(tipoPalio, 6); return; }
+  if(!prep){ avanzaFasePalioFantino(tipoPalio, 7); return; }
   const { contradeRivali, assegnazione, accordi } = prep;
 
   if(!S.amiciziaFantini) S.amiciziaFantini = {};
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 5;
+  const faseIdx = 6;
 
   const progressHtml = FASI_PALIO_FANTINO.map((f,i) => `
     <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i<=faseIdx?'var(--ocra)':'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -10737,7 +11510,9 @@ function renderAccordiFantiniRivali(tipoPalio){
     if(!f) return '';
     const amicizia = (S.amiciziaFantini[nomeFantino] !== undefined) ? S.amiciziaFantini[nomeFantino] : 50;
     const media = _mediaStatFantinoRivale(f);
-    const suggerita = Math.max(0, Math.round((media*1200 - amicizia) * 1.3));
+    // Le prove di questa contrada (prime tre / ultime tre) alzano o abbassano la cifra richiesta.
+    const bonusProve = bonusProveContradaFantino(datiPalio, nomeContrada);
+    const suggerita = Math.max(0, Math.round((media*1200 - amicizia) * 1.3) + bonusProve);
     const esito = accordi[nomeContrada];
 
     let corpo;
@@ -10822,8 +11597,8 @@ function renderAccordiFantiniRivali(tipoPalio){
         </div>
       </div>
       ${boxHtml}
-      <button class="btn ${nAccordi>0?'gold':''} w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 6)">
-        ${nAccordi>0?'🤝':'🚫'} Nessun accordo · ${FASI_PALIO_FANTINO[6].icona} ${FASI_PALIO_FANTINO[6].titolo} →
+      <button class="btn ${nAccordi>0?'gold':''} w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 7)">
+        ${nAccordi>0?'🤝':'🚫'} Nessun accordo · ${FASI_PALIO_FANTINO[7].icona} ${FASI_PALIO_FANTINO[7].titolo} →
       </button>
     </div>
   </div>
@@ -10847,7 +11622,9 @@ function offriAccordoFantinoRivale(tipoPalio, nomeContrada, idx){
   const amicizia = (S.amiciziaFantini[nomeFantino] !== undefined) ? S.amiciziaFantini[nomeFantino] : 50;
   const media = _mediaStatFantinoRivale(f);
   const fattoreRandom = 0.8 + Math.random()*0.4;
-  const soglia = Math.max(0, (media*1200 - amicizia) * fattoreRandom);
+  // Le prove di questa contrada (prime tre / ultime tre) alzano o abbassano la soglia richiesta.
+  const bonusProve = bonusProveContradaFantino(datiPalio, nomeContrada);
+  const soglia = Math.max(0, (media*1200 - amicizia) * fattoreRandom + bonusProve);
 
   if(offerta < soglia){
     S.amiciziaFantini[nomeFantino] = Math.max(0, amicizia - 10);
@@ -10976,10 +11753,10 @@ function valutaStrategiaCapitanoFantino(tipoPalio, esito){
 function renderIstruzioniCapitanoFantino(tipoPalio){
   if(!S) return;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
-  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 6); return; }
+  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 7); return; }
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 6;
+  const faseIdx = 7;
   const accordi = datiPalio.accordiFantiniRivali || {};
   const accettati = Object.entries(accordi).filter(([,a]) => a.stato === 'accettato');
 
@@ -11114,8 +11891,8 @@ function renderIstruzioniCapitanoFantino(tipoPalio){
         </div>
         ${righeAccordi}
       </div>
-      <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 7)">
-        ${FASI_PALIO_FANTINO[7].icona} ${FASI_PALIO_FANTINO[7].titolo} →
+      <button class="btn gold w" style="margin-top:4px" onclick="avanzaFasePalioFantino('${tipoPalio}', 8)">
+        ${FASI_PALIO_FANTINO[8].icona} ${FASI_PALIO_FANTINO[8].titolo} →
       </button>
     </div>
   </div>
@@ -11222,12 +11999,12 @@ function estraiCanapoPalioFantino(tipoPalio){
 function renderCanapoPalioFantino(tipoPalio){
   if(!S) return;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
-  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 6); return; }
+  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 7); return; }
 
   const canapo = preparaCanapoPalioFantino(tipoPalio);
   const contradaGiocatore = datiPalio.contradaFantino;
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 7;
+  const faseIdx = 8;
 
   const progressHtml = FASI_PALIO_FANTINO.map((f,i) => `
     <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i<=faseIdx?'var(--ocra)':'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -11339,12 +12116,12 @@ function renderCanapoPalioFantino(tipoPalio){
 function renderMossaPalioFantino(tipoPalio){
   if(!S) return;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
-  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 6); return; }
-  if(!datiPalio.canapoFantino || !datiPalio.canapoFantino.completata){ avanzaFasePalioFantino(tipoPalio, 7); return; }
+  if(!datiPalio || !datiPalio.contradaFantino){ avanzaFasePalioFantino(tipoPalio, 7); return; }
+  if(!datiPalio.canapoFantino || !datiPalio.canapoFantino.completata){ avanzaFasePalioFantino(tipoPalio, 8); return; }
   if(datiPalio.mossaFantino){ renderEsitoMossaFantino(tipoPalio); return; } // mossa già disputata
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 8;
+  const faseIdx = 9;
 
   const progressHtml = FASI_PALIO_FANTINO.map((f,i) => `
     <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i<=faseIdx?'var(--ocra)':'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -11437,7 +12214,7 @@ function renderAtteggiamentoGaraFantino(tipoPalio){
   if(datiPalio.atteggiamentoGaraFantino){ avviaMossaCorsaFantino(tipoPalio); return; }
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 8;
+  const faseIdx = 9;
 
   const progressHtml = FASI_PALIO_FANTINO.map((f,i) => `
     <div style="width:${100/FASI_PALIO_FANTINO.length - 1}%;height:4px;border-radius:2px;background:${i<=faseIdx?'var(--ocra)':'rgba(200,153,30,.15)'};display:inline-block;margin:0 0.5%"></div>
@@ -11628,10 +12405,10 @@ function concludiMossaCorsaFantino(tipoPalio, bonus, esito){
 function renderEsitoMossaFantino(tipoPalio){
   if(!S) return;
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
-  if(!datiPalio || !datiPalio.mossaFantino){ avanzaFasePalioFantino(tipoPalio, 9); return; }
+  if(!datiPalio || !datiPalio.mossaFantino){ avanzaFasePalioFantino(tipoPalio, 10); return; }
 
   const nomePalio = tipoPalio === 'luglio' ? 'Luglio' : 'Agosto';
-  const faseIdx = 8;
+  const faseIdx = 9;
   const m = datiPalio.mossaFantino;
 
   const etichette = {
@@ -11684,8 +12461,8 @@ function renderEsitoMossaFantino(tipoPalio){
         <div style="font-family:var(--fn);font-size:20px;font-weight:700;color:${e.colore}">×${m.bonus}</div>
       </div>
       ${accordoHtml}
-      <button class="btn gold w" onclick="avanzaFasePalioFantino('${tipoPalio}', 9)">
-        ${FASI_PALIO_FANTINO[9].icona} ${FASI_PALIO_FANTINO[9].titolo} →
+      <button class="btn gold w" onclick="avanzaFasePalioFantino('${tipoPalio}', 10)">
+        ${FASI_PALIO_FANTINO[10].icona} ${FASI_PALIO_FANTINO[10].titolo} →
       </button>
     </div>
   </div>
@@ -11726,7 +12503,12 @@ function renderVincitorePalioFantino(tipoPalio){
       datiPalio.vincitore = partecipanti.length ? partecipanti[Math.floor(Math.random()*partecipanti.length)] : null;
       salvaCorrente();
     }
+    if(!datiPalio.accoppiataVincente){
+      datiPalio.accoppiataVincente = estraiAccoppiataVincentePalioAssente();
+      salvaCorrente();
+    }
     const vincitore = datiPalio.vincitore;
+    const accoppiata = datiPalio.accoppiataVincente;
     const datiVincitore = CONTRADE.find(c => c.nome === vincitore);
 
     setMain(`
@@ -11751,10 +12533,11 @@ function renderVincitorePalioFantino(tipoPalio){
           <div style="font-family:var(--fs);font-size:26px;font-weight:700;color:var(--ocra);margin-bottom:8px">
             ${vincitore ? `Contrada del${/^[AEIOU]/.test(vincitore)?'l\'':' '}${vincitore}` : 'Palio non disputato'}
           </div>
-          <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);line-height:1.7;margin-bottom:20px">
+          <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);line-height:1.7;margin-bottom:12px">
             ${vincitore ? `Il drappellone di ${nomePalio} ${S.anno} va alla Contrada del${/^[AEIOU]/.test(vincitore)?'l\'':' '}${vincitore}.<br>` : ''}
             Nessuna contrada ti ha ingaggiato per questa Carriera — l'anno prossimo andrà meglio.
           </div>
+          ${htmlAccoppiataVincentePalioAssente(accoppiata)}
           <button class="btn gold w" onclick="${nextFn}">
             ${tipoPalio === 'luglio' ? '📅 Vai a Luglio →' : '📅 Nuovo anno →'}
           </button>
@@ -12104,6 +12887,13 @@ function concludiMinigiocoMossa(bonus){
     return;
   }
 
+  if(contesto === 'provaFantino'){
+    const tipoPalio = st.tipoPalio, garaIdx = st.garaIdx;
+    window._mossaState = null;
+    disputaProvaFantino(tipoPalio, garaIdx, bonus);
+    return;
+  }
+
   const indiceBatteria = st.indiceBatteria;
   window._mossaState = null;
 
@@ -12162,30 +12952,31 @@ function renderTutorialCapitano(){
   ${tutAcc('🏛️','Governo della Contrada',`
     <p>Dal menu principale hai cinque strumenti per gestire la Contrada durante l'anno:</p>
     <p><b>🏛️ Info Contrade</b> — la mappa delle 17 contrade di Siena, con le loro rivalità storiche e alleanze: sapere chi è amico e chi è nemico ti aiuta a scegliere accordi e bersagli.</p>
-    <p><b>🏰 Maniero</b> — la sede della Contrada. Qui tieni d'occhio <b>morale dei contradaioli</b> e <b>condizioni del maniero</b> (calano di 5 punti ogni mese) e puoi compiere, una volta al mese ciascuna: organizzare una <b>cena</b>, vendere <b>gadget</b>, organizzare un <b>evento</b>, fare <b>manutenzione</b> (+condizioni) o pagare per <b>proteggerti dagli scherzi</b> riducendo la probabilità di imprevisti per un anno.</p>
+    <p><b>🏰 Società</b> — la sede della Contrada. Qui tieni d'occhio <b>morale dei contradaioli</b> e <b>condizioni della società</b> (calano di 5 punti ogni mese) e puoi compiere, una volta al mese ciascuna: organizzare una <b>cena</b>, vendere <b>gadget</b>, organizzare un <b>evento</b>, fare <b>manutenzione</b> (+condizioni) o pagare per <b>proteggerti dagli scherzi</b> riducendo la probabilità di imprevisti per un anno.</p>
     <p><b>🤝 Contatta i Fantini</b> — qui costruisci l'<b>intesa</b> con i fantini del database prima della Tratta: ogni mese hai un numero limitato di visite "Vai a trovarlo" (a pagamento) per farla crescere. Più intesa hai con un buon fantino, più chance di vittoria alla Carriera.</p>
     <p><b>🏇 Corse in Provincia</b> — palii minori fuori Siena, utili per far correre ed esercitare i cavalli lontano dalla pressione del Palio vero.</p>
-    <p><b>🎯 Obiettivi</b> — le mete dell'annata (organizzare una cena, portare il maniero a condizioni 100, vincere Luglio o Agosto, fare il "cappotto"...). Ogni obiettivo completato dà <b>+5 Prestigio</b>, una sola volta.</p>
+    <p><b>🎯 Obiettivi</b> — le mete dell'annata (organizzare una cena, portare la società a condizioni 100, vincere Luglio o Agosto, fare il "cappotto"...). Ogni obiettivo completato dà <b>+5 Prestigio</b>, una sola volta.</p>
   `)}
 
   ${tutAcc('🏇','I giorni del Palio',`
-    <p>Quando la tua Contrada è tra le 10 estratte, il Palio si gioca in <b>11 fasi</b> in sequenza, ognuna con una propria schermata narrativa:</p>
+    <p>Quando la tua Contrada è tra le 10 estratte, il Palio si gioca in <b>12 fasi</b> in sequenza, ognuna con una propria schermata narrativa:</p>
     ${tutFase(1,'🎲','La Tratta','I cavalli disponibili vengono sorteggiati e abbinati alle contrade partecipanti. Un buon cavallo vale già metà vittoria.')}
     ${tutFase(2,'🐎','Scelta dei Cavalli','Valuti l\'animale che ti è capitato: passo, muscolatura, carattere.')}
     ${tutFase(3,'📜','Presentazione del Lotto','Il Comune presenta ufficialmente i cavalli sorteggiati a tutte le contrade.')}
     ${tutFase(4,'✅','Assegnazione Cavalli','L\'abbinamento diventa definitivo: il cavallo entra nella tua stalla per tre giorni.')}
     ${tutFase(5,'🤝','Ingaggia il Fantino','Tratti e chiudi l\'accordo con il fantino che monterà per te, sulla base dell\'intesa costruita durante l\'anno.')}
-    ${tutFase(6,'🍷','Cena della Vigilia','La grande cena di contrada la sera prima della corsa: morale e coesione dei contradaioli.')}
-    ${tutFase(7,'🗺️','Accordi Segreti','Puoi concordare accordi riservati con contrade alleate per favorire il tuo passaggio in pista (pagando in oro).')}
-    ${tutFase(8,'⚔️','Tattica di Gara','Dai le istruzioni tattiche al tuo fantino: come partire, quando spingere, come gestire le curve del Casato e di San Martino.')}
-    ${tutFase(9,'🎯','Estrazione al Canapo','Il sorteggio stabilisce la posizione di partenza alla mossa: può fare la differenza tra gloria e delusione.')}
-    ${tutFase(10,'🏆','Il Palio e il Vincitore','Tre giri di Piazza del Campo, poi il drappellone va alla Contrada che ha portato per prima il cavallo al traguardo.')}
+    ${tutFase(6,'🏁','Le Prove','Sei corse ufficiali in Piazza del Campo con le accoppiate ormai decise. Prima di ognuna scegli un intervento permanente sul cavallo (nuova ferratura, cambio imboccatura, super mangime, giretto di scarico o nessun intervento, ciascuno con un costo diverso), valido fino a fine Palio: i piazzamenti ottenuti pesano poi sulle pretese delle contrade negli Accordi Segreti.')}
+    ${tutFase(7,'🍷','Cena della Vigilia','La grande cena di contrada la sera prima della corsa: morale e coesione dei contradaioli.')}
+    ${tutFase(8,'🗺️','Accordi Segreti','Puoi concordare accordi riservati con contrade alleate per favorire il tuo passaggio in pista (pagando in oro).')}
+    ${tutFase(9,'⚔️','Tattica di Gara','Dai le istruzioni tattiche al tuo fantino: come partire, quando spingere, come gestire le curve del Casato e di San Martino.')}
+    ${tutFase(10,'🎯','Estrazione al Canapo','Il sorteggio stabilisce la posizione di partenza alla mossa: può fare la differenza tra gloria e delusione.')}
+    ${tutFase(11,'🏆','Il Palio e il Vincitore','Tre giri di Piazza del Campo, poi il drappellone va alla Contrada che ha portato per prima il cavallo al traguardo.')}
     <div class="tut-note">💡 Ogni scelta lungo queste fasi (intesa col fantino, accordi, tattica, posizione al canapo) pesa sulle probabilità di vittoria calcolate a fine corsa: non esiste un'unica mossa giusta, ma più prepari il terreno durante l'anno, più le probabilità pendono dalla tua parte.</div>
   `)}
 
   ${tutAcc('🕯️','Consigli del vecchio capitano',`
     <ul>
-      <li>Tieni d'occhio <b>morale</b> e <b>condizioni del maniero</b>: se scendono troppo, gli imprevisti negativi diventano più frequenti e più dolorosi.</li>
+      <li>Tieni d'occhio <b>morale</b> e <b>condizioni della società</b>: se scendono troppo, gli imprevisti negativi diventano più frequenti e più dolorosi.</li>
       <li>Visita i fantini con costanza: l'intesa costruita nei mesi "tranquilli" è quella che ti salva a Luglio e Agosto.</li>
       <li>Non spendere tutto l'oro subito: ingaggio, cena della vigilia e accordi segreti arrivano tutti nello stesso mese del Palio.</li>
       <li>Studia le rivalità in <b>Info Contrade</b> prima di proporre un accordo segreto: un'alleata storica accetterà più volentieri.</li>
@@ -12227,7 +13018,7 @@ function renderTutorialFantino(){
   `)}
 
   ${tutAcc('🐎','La vita da Fantino, mese per mese',`
-    <p>Come il Capitano, avanzi il tempo con <b>"Avanza al mese successivo"</b> e ricevi ogni volta il <b>Giornale di Siena</b> con le notizie (e gli imprevisti) del mese. Hai quattro strumenti per costruire la tua carriera:</p>
+    <p>Come il Capitano, avanzi il tempo con <b>"Avanza al mese successivo"</b> e ricevi ogni volta il <b>Giornale di Siena</b> con le notizie (e gli imprevisti) del mese. Hai cinque strumenti per costruire la tua carriera:</p>
     <p><b>🏛️ Rapporti con le Contrade</b> — la tua <b>intesa</b> con ciascuna delle 17 contrade: più è alta, più probabilità hai di essere notato e ingaggiato. Puoi coltivarla anche con il minigioco <b>"Incontra"</b> (una sfida a Forza 4 contro un rappresentante di contrada).</p>
     <p><b>🐎 Stalla</b> — i cavalli che possiedi o su cui puoi allenarti: qui gestisci il loro allenamento mensile e la loro stanchezza in vista delle corse.</p>
     <p><b>🤝 Fantini</b> — i colleghi rivali: puoi coltivare amicizie utili per gli accordi tra fantini durante il Palio.</p>
@@ -12241,17 +13032,19 @@ function renderTutorialFantino(){
     ${tutFase(2,'📜','Presentazione del Lotto','Il Comune presenta ufficialmente i dieci cavalli scelti per la Carriera.')}
     ${tutFase(3,'✅','Assegnazione Cavalli','I cavalli del lotto vengono abbinati a sorte alle dieci contrade partecipanti.')}
     ${tutFase(4,'💰','Offerte delle Contrade','Se non hai ancora un ingaggio, le contrade rimaste senza fantino si fanno avanti con proposte: a te la scelta di quale accettare.')}
-    ${tutFase(5,'🗺️','Accordi con le Contrade','Trattative segrete con le altre contrade per favorire il tuo passaggio in Piazza.')}
-    ${tutFase(6,'🤝','Accordi tra Fantini','Patti e promesse scambiati con i colleghi delle altre contrade, basati sull\'amicizia costruita durante l\'anno.')}
-    ${tutFase(7,'⚔️','Istruzioni del Capitano','Il capitano della Contrada che monti ti dà le ultime indicazioni tattiche: sta a te seguirle o meno.')}
-    ${tutFase(8,'🎯','Estrazione al Canapo','Il sorteggio stabilisce la tua posizione di partenza alla mossa.')}
-    ${tutFase(9,'🚩','La Mossa','Il momento della partenza vera e propria: un minigioco di tempismo decide come parti.')}
-    ${tutFase(10,'🏆','Il Palio e il Vincitore','Tre giri di Piazza del Campo in sella: il drappellone va a chi porta per primo il cavallo al traguardo.')}
+    ${tutFase(5,'🏇','Le Prove','Sei corse ufficiali in Piazza del Campo con le accoppiate ormai decise. I piazzamenti contano: chiudere tra i primi tre alza le offerte delle contrade e le richieste dei fantini rivali nelle fasi successive, chiudere tra gli ultimi tre le fa scendere.')}
+    ${tutFase(6,'🗺️','Accordi con le Contrade','Trattative segrete con le altre contrade per favorire il tuo passaggio in Piazza.')}
+    ${tutFase(7,'🤝','Accordi tra Fantini','Patti e promesse scambiati con i colleghi delle altre contrade, basati sull\'amicizia costruita durante l\'anno.')}
+    ${tutFase(8,'⚔️','Istruzioni del Capitano','Il capitano della Contrada che monti ti dà le ultime indicazioni tattiche: sta a te seguirle o meno.')}
+    ${tutFase(9,'🎯','Estrazione al Canapo','Il sorteggio stabilisce la tua posizione di partenza alla mossa.')}
+    ${tutFase(10,'🚩','La Mossa','Prima del minigioco scegli un <b>Atteggiamento di Gara</b> (D\'Attacco, Di Rimonta o Scambio di nerbate con la contrada storicamente nemica), che modifica le statistiche del cavallo e la difficoltà della mossa. Poi arriva il momento della partenza vera e propria: un minigioco di tempismo decide come parti.')}
+    ${tutFase(11,'🏆','Il Palio e il Vincitore','Tre giri di Piazza del Campo in sella: il drappellone va a chi porta per primo il cavallo al traguardo.')}
     <div class="tut-note">💡 Empatia e intesa costruite durante l'anno tornano utili proprio nelle fasi di Offerte e Accordi: un fantino con buoni rapporti arriva al Palio con più opzioni sul tavolo.</div>
   `)}
 
-  ${tutAcc('🚩','Il minigioco della Mossa',`
-    <p>Alla partenza compare una barra che si muove: devi fermarla al momento giusto premendo il tasto. Il tempismo determina l'esito — da <b>Mossa Perfetta</b> a <b>Mossa Pessima</b> — che assegna un bonus di velocità per la corsa e influenza la tua statistica di <b>Gestione Mossa</b>.</p>
+  ${tutAcc('🎯','L\'Atteggiamento di Gara e la Mossa',`
+    <p>Subito prima del minigioco della Mossa scegli come affrontare la Carriera: <b>D'Attacco</b> (accelerazione del cavallo +1, ma zona verde della mossa dimezzata e barra più veloce), <b>Di Rimonta</b> (mossa più facile da gestire, velocità del cavallo −1) oppure <b>Scambio di nerbate</b> (velocità del tuo cavallo e di quello della contrada storicamente nemica entrambe −2, se presente al Palio).</p>
+    <p>Poi alla partenza compare una barra che si muove: devi fermarla al momento giusto premendo il tasto. Il tempismo determina l'esito — da <b>Mossa Perfetta</b> a <b>Mossa Pessima</b> — che assegna un bonus di velocità per la corsa e influenza la tua statistica di <b>Gestione Mossa</b>.</p>
     <p>Più la tua Gestione Mossa è alta, più sarà facile ripetere buone partenze nel tempo.</p>
   `)}
 
