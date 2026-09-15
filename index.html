@@ -1176,6 +1176,79 @@ function selContrada(idx){
 }
 
 /* ═══════════════════════════════════════════════
+   STATISTICHE DINAMICHE DEI FANTINI (Bravura/Esperienza)
+   All'inizio di ogni carriera (Capitano o Fantino) si copiano i valori di
+   partenza dal database esterno (FANTINI_DB) in S.fantiniStats. Da quel
+   momento in poi ogni Palio (disputato dal giocatore oppure simulato) può
+   far evolvere Bravura ed Esperienza di ciascun fantino, rendendo il
+   database "vivo" nel corso della singola carriera invece che statico.
+═══════════════════════════════════════════════ */
+function inizializzaFantiniStats(){
+  const stats = {};
+  if(typeof FANTINI_DB !== 'undefined'){
+    FANTINI_DB.forEach(f=>{
+      stats[f.nome] = { bravura: f.bravura ?? 3, esperienza: f.esperienza ?? 3 };
+    });
+  }
+  return stats;
+}
+
+/* Ritorna l'oggetto statistiche "vive" di un fantino: tutti i campi provengono
+   dal database esterno, tranne bravura ed esperienza che, se la carriera è
+   in corso ed è già stata registrata un'evoluzione per quel fantino, vengono
+   sovrascritte con il valore aggiornato in S.fantiniStats. */
+function statsFantino(nome){
+  if(typeof FANTINI_DB === 'undefined' || !nome) return undefined;
+  const base = FANTINI_DB.find(x => x.nome === nome);
+  if(!base) return undefined;
+  const dyn = (typeof S !== 'undefined' && S && S.fantiniStats) ? S.fantiniStats[nome] : null;
+  if(!dyn) return base;
+  return Object.assign({}, base, { bravura: dyn.bravura, esperienza: dyn.esperienza });
+}
+
+/* Applica una variazione (+1 o -1) a bravura ed esperienza di un fantino,
+   creando la voce in S.fantiniStats se non esiste ancora (retrocompatibilità
+   con salvataggi creati prima di questa funzionalità). Il placeholder 'Tu'
+   usato in Carriera Fantino per il cavaliere-giocatore viene ignorato: le
+   sue statistiche personali sono già regolamentate altrove. */
+function applicaVariazioneStatFantino(nome, delta){
+  if(!S || !nome || nome === 'Tu' || !delta) return;
+  if(!S.fantiniStats) S.fantiniStats = inizializzaFantiniStats();
+  if(!S.fantiniStats[nome]){
+    const base = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nome) : null;
+    S.fantiniStats[nome] = { bravura: base?.bravura ?? 3, esperienza: base?.esperienza ?? 3 };
+  }
+  const st = S.fantiniStats[nome];
+  st.bravura    = Math.max(1, Math.min(5, (st.bravura    ?? 3) + delta));
+  st.esperienza = Math.max(1, Math.min(5, (st.esperienza ?? 3) + delta));
+}
+
+/* Elabora l'evoluzione delle statistiche dei fantini al termine di un Palio
+   disputato (dal giocatore, in Carriera Capitano o Carriera Fantino):
+   - vince il Palio (1° posto)              → Bravura +1, Esperienza +1
+   - arriva 2° o 3°                         → nessuna variazione
+   - arriva dal 4° posto in giù             → Bravura -1, Esperienza -1
+   - non ha preso parte al Palio            → nessuna variazione
+   classificaContrade = array ordinato dei nomi delle contrade (1° posto primo)
+   coppie             = array di { nomeContrada, nomeFantino } della corsa simulata
+   escludiContrada     = nome della contrada del giocatore in Carriera Fantino
+                          (la sua variazione statistiche è già gestita a parte) */
+function applicaEvoluzioneFantiniPalio(classificaContrade, coppie, escludiContrada){
+  if(!classificaContrade || !coppie) return;
+  const mappaFantino = {};
+  coppie.forEach(cp => { if(cp && cp.nomeFantino) mappaFantino[cp.nomeContrada] = cp.nomeFantino; });
+  classificaContrade.forEach((nomeContrada, idx) => {
+    if(escludiContrada && nomeContrada === escludiContrada) return;
+    const nomeFantino = mappaFantino[nomeContrada];
+    if(!nomeFantino) return;
+    const posizione = idx + 1;
+    if(posizione === 1) applicaVariazioneStatFantino(nomeFantino, +1);
+    else if(posizione >= 4) applicaVariazioneStatFantino(nomeFantino, -1);
+    // 2° e 3° posto: nessuna variazione
+  });
+}
+
+/* ═══════════════════════════════════════════════
    INIZIO CARRIERA CAPITANO
 ═══════════════════════════════════════════════ */
 function iniziaCarrieraCapitano(){
@@ -1231,6 +1304,7 @@ function iniziaCarrieraCapitano(){
     strisciaVittorieAnnuali: 0,   // anni consecutivi con almeno una vittoria (per l'obiettivo "Vero Vincente")
     amicizia,
     intesaFantini,
+    fantiniStats: inizializzaFantiniStats(),
     visiteFantiniMese: 0,
     corseProvinciaAnnullateMese: false,
     stelline: {},
@@ -1238,6 +1312,7 @@ function iniziaCarrieraCapitano(){
     corsaProvinciaMese: null,
     _storicoAzioni: {},
     obiettiviCompletati: {},
+    alboDoro: [],
     dirittoLuglio: ['Chiocciola','Pantera','Nicchio','Selva','Lupa','Istrice','Tartuca'],
     dirittoAgosto: ['Drago','Valdimontone','Pantera','Civetta','Tartuca','Leocorno','Bruco'],
     palioLuglioAnno: null,
@@ -1356,6 +1431,15 @@ function renderGiocoCapitano(){
         <div>
           <div class="sec-btn-label">Obiettivi</div>
           <div class="sec-btn-sub">Le mete della contrada per questa annata</div>
+        </div>
+        <span class="sec-btn-chev">›</span>
+      </button>
+
+      <button class="sec-btn" onclick="renderAlboDoro()">
+        <span class="sec-btn-icon">🏆</span>
+        <div>
+          <div class="sec-btn-label">Albo d'oro</div>
+          <div class="sec-btn-sub">Tutti i Palii vinti dalla tua contrada</div>
         </div>
         <span class="sec-btn-chev">›</span>
       </button>
@@ -1877,6 +1961,10 @@ function renderPalioNonPartecipante(tipoPalio, vincitore) {
   const datiPalio = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
   if (datiPalio && !datiPalio.accoppiataVincente) {
     datiPalio.accoppiataVincente = estraiAccoppiataVincentePalioAssente();
+    // Palio simulato: solo il fantino vincente ottiene +1 Bravura/+1 Esperienza.
+    if (datiPalio.accoppiataVincente && datiPalio.accoppiataVincente.fantino) {
+      applicaVariazioneStatFantino(datiPalio.accoppiataVincente.fantino.nome, +1);
+    }
     salvaCorrente();
   }
   const accoppiata = datiPalio ? datiPalio.accoppiataVincente : estraiAccoppiataVincentePalioAssente();
@@ -2030,6 +2118,11 @@ function renderFasePalio(tipoPalio, faseIdx) {
         if (tipoPalio === 'agosto' && S.palioLuglioAnno && S.palioLuglioAnno.vincitore === S.contrada.nome && !S.obiettiviCompletati['cappotto']) {
           S.obiettiviCompletati['cappotto'] = true; S.prestigio = (S.prestigio||0) + 5;
         }
+        // Registra la vittoria nell'Albo d'oro della carriera Capitano.
+        if (!S.alboDoro) S.alboDoro = [];
+        const assegnazioniVittoriaCap = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
+        const cavalloVincitoreCap = Object.keys(assegnazioniVittoriaCap).find(cav => assegnazioniVittoriaCap[cav] === S.contrada.nome) || null;
+        S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'capitano', fantino: nomeFantino, cavallo: cavalloVincitoreCap });
         S.log.push(`Vittoria al Palio di ${nomePalio} ${S.anno}! +1 vittoria, morale +50, prestigio +10, intesa fantino +10.`);
       } else {
         // sconfitta
@@ -2040,6 +2133,13 @@ function renderFasePalio(tipoPalio, faseIdx) {
         S.log.push(`Sconfitta al Palio di ${nomePalio} ${S.anno} (${piazzamento||'?'}° posto). Morale -50, intesa fantino -20.`);
       }
       if (premioOro > 0) S.log.push(`Premio piazzamento (${piazzamento}° posto): +${premioOro} oro.`);
+
+      // Evoluzione statistiche fantini: vince +1 Bravura/+1 Esperienza,
+      // dal 4° posto in giù -1/-1, 2°/3° posto e non partecipanti invariati.
+      if (datiPalio.corsaSimulata && datiPalio.corsaClassifica) {
+        applicaEvoluzioneFantiniPalio(datiPalio.corsaClassifica, datiPalio.corsaSimulata.coppie, null);
+      }
+
       salvaCorrente();
       verificaObiettivi();
     }
@@ -2206,14 +2306,15 @@ function preparaCorsaPalio(tipoPalio) {
   const fantiniContrade = datiPalio.fantiniContrade || {};
 
   const trovaFantino = (nomeContrada) => {
-    if (nomeContrada === S.contrada.nome && nomeFantinoGiocatore && typeof FANTINI_DB !== 'undefined') {
-      const f = FANTINI_DB.find(x => x.nome === nomeFantinoGiocatore);
+    if (nomeContrada === S.contrada.nome && nomeFantinoGiocatore) {
+      const f = statsFantino(nomeFantinoGiocatore);
       if (f) return f;
     }
     const fObj = fantiniContrade[nomeContrada];
-    if (fObj) return fObj;
+    if (fObj) return statsFantino(fObj.nome) || fObj;
     if (typeof FANTINI_DB !== 'undefined' && FANTINI_DB.length) {
-      return FANTINI_DB[Math.floor(Math.random() * FANTINI_DB.length)];
+      const rnd = FANTINI_DB[Math.floor(Math.random() * FANTINI_DB.length)];
+      return statsFantino(rnd.nome) || rnd;
     }
     return { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
   };
@@ -2295,7 +2396,7 @@ function preparaCorsaPalio(tipoPalio) {
   }
 
   const corsaSimulata = {
-    coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
+    coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
     giroMostrato: 0,   // quanti giri ha già visto il giocatore (0 = nessuno)
@@ -2355,12 +2456,13 @@ function preparaCorsaPalioFantino(tipoPalio) {
       return { nome:'Tu', bravura:S.bravura||1, esperienza:S.esperienza||1, gestione_mossa:S.gestioneMossa||1, empatia:S.empatia||1 };
     }
     const nomeFan = fantiniRivali[nomeContrada];
-    if (nomeFan && typeof FANTINI_DB !== 'undefined') {
-      const f = FANTINI_DB.find(x => x.nome === nomeFan);
+    if (nomeFan) {
+      const f = statsFantino(nomeFan);
       if (f) return f;
     }
     if (typeof FANTINI_DB !== 'undefined' && FANTINI_DB.length) {
-      return FANTINI_DB[Math.floor(Math.random() * FANTINI_DB.length)];
+      const rnd = FANTINI_DB[Math.floor(Math.random() * FANTINI_DB.length)];
+      return statsFantino(rnd.nome) || rnd;
     }
     return { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
   };
@@ -2432,7 +2534,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
   }
 
   const corsaSimulata = {
-    coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
+    coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
     giroMostrato: 0,
@@ -3048,6 +3150,144 @@ function angoloAlPercorso(pts, fraz) {
 }
 
 /* ─────────────────────────────────────────────
+   SORPASSI — scostamento laterale dei cavalli
+   per evitare che si sovrappongano quando si
+   superano (linea interna o esterna alla pista)
+───────────────────────────────────────────── */
+
+// Calcolato UNA VOLTA sola all'avvio (dipende solo dalla forma della pista,
+// non dal frame): dice se bisogna invertire il segno della normale +90°
+// per farla puntare sempre verso l'ESTERNO della pista.
+function segnoNormaleEsterna(percorso) {
+  let areaSegno = 0;
+  const n = percorso.length;
+  for (let i = 0; i < n; i++) {
+    const a = percorso[i], b = percorso[(i+1) % n];
+    areaSegno += a.x*b.y - b.x*a.y;
+  }
+  return areaSegno > 0 ? -1 : 1;
+}
+
+// Normale al percorso in un punto continuo (fraz 0..1): positiva = verso
+// l'esterno della pista, negativa = verso l'interno (il "prato" centrale).
+function normaleAlPercorso(percorso, fraz, segno) {
+  const ang = angoloAlPercorso(percorso, fraz);
+  return {
+    x: Math.cos(ang + Math.PI/2) * segno,
+    y: Math.sin(ang + Math.PI/2) * segno
+  };
+}
+
+// Combina posizione centrale + scostamento laterale: da usare al posto
+// della sola posizioneAlPercorso ovunque si disegni un cavallo, sia nel
+// rendering 2D sia (in futuro) in quello 3D.
+function posizioneConScarto(percorso, fraz, offsetLat, segnoNormale) {
+  const c = posizioneAlPercorso(percorso, fraz);
+  const nrm = normaleAlPercorso(percorso, fraz, segnoNormale);
+  return { x: c.x + nrm.x*offsetLat, y: c.y + nrm.y*offsetLat };
+}
+
+// Aggiorna, per ogni cavallo in corsa, lo scostamento laterale rispetto
+// alla linea centrale: se un cavallo sta per raggiungere chi ha davanti
+// sulla stessa linea, sceglie un lato (interno o esterno, quello meno
+// affollato) e ci si sposta gradualmente; a sorpasso completato torna
+// verso il centro. `s` è window._palioAnimState, `dtMs` il delta-tempo
+// del frame in millisecondi.
+function aggiornaSorpassi(s, dtMs) {
+  const margineBordo = s.bandW * 0.18;            // non arrivare a toccare i bordi
+  const semiLarghezza = s.bandW/2 - margineBordo;  // scostamento massimo consentito
+  const sogliaGap = 0.032;                         // reagisce prima (era 0.018): più tempo per completare la sterzata
+  const sogliaLaterale = s.bandW * 0.30;           // sotto questa distanza laterale, rischio sovrapposizione
+  const sogliaCongestione = 0.032;                 // raggio, attorno al cavallo da sorpassare, entro cui contare chi occupa già un lato
+  const velManovra = s.bandW * 1.3;                // sterzata più reattiva (era 0.9): completa lo scarto in meno tempo
+
+  s.contrade.forEach(nc => {
+    // Trova il cavallo immediatamente davanti (progresso maggiore, gap minimo)
+    let davanti = null, gapMin = Infinity;
+    s.contrade.forEach(altro => {
+      if (altro === nc) return;
+      const gap = (s.progresso[altro]||0) - (s.progresso[nc]||0);
+      if (gap > 0 && gap < gapMin) { gapMin = gap; davanti = altro; }
+    });
+
+    if (davanti && gapMin < sogliaGap) {
+      const distLat = Math.abs((s.offsetLat[nc]||0) - (s.offsetTarget[davanti]||0));
+      if (distLat < sogliaLaterale && !s.latoSorpasso[nc]) {
+        // Scegli il lato meno "affollato": conta quanti cavalli sono già
+        // scostati verso l'interno vs l'esterno vicino al cavallo DA SORPASSARE
+        // (non vicino a nc). Così due inseguitori diversi che puntano allo
+        // stesso cavallo davanti si "vedono" a vicenda anche se non sono
+        // vicini tra loro, ed evitano di scegliere entrambi lo stesso lato.
+        let occInterno = 0, occEsterno = 0;
+        s.contrade.forEach(altro => {
+          if (altro === nc) return;
+          const gapAltro = Math.abs((s.progresso[altro]||0) - (s.progresso[davanti]||0));
+          if (gapAltro < sogliaCongestione) {
+            if ((s.offsetTarget[altro]||0) < -1e-6) occInterno++;
+            else if ((s.offsetTarget[altro]||0) > 1e-6) occEsterno++;
+          }
+        });
+        // In caso di parità, spareggio casuale: evita che due cavalli con lo
+        // stesso conteggio (es. entrambi 0) scelgano sistematicamente lo
+        // stesso lato di default.
+        const preferisceInterno = occInterno === occEsterno
+          ? Math.random() < 0.5
+          : occInterno < occEsterno;
+        s.latoSorpasso[nc] = preferisceInterno ? 'interno' : 'esterno';
+        s.offsetTarget[nc] = preferisceInterno ? -semiLarghezza : semiLarghezza;
+      }
+    } else if (s.latoSorpasso[nc] && (!davanti || (s.progresso[nc]||0) > (s.progresso[davanti]||0))) {
+      // Sorpasso completato (o non serve più): torna verso la linea centrale
+      s.latoSorpasso[nc] = null;
+      s.offsetTarget[nc] = 0;
+    }
+
+    // Interpolazione morbida verso il target — mai uno scatto secco
+    const attuale = s.offsetLat[nc] || 0;
+    const target = s.offsetTarget[nc] || 0;
+    const passoMax = velManovra * (dtMs/1000);
+    const diff = target - attuale;
+    const passo = Math.sign(diff) * Math.min(Math.abs(diff), passoMax);
+    s.offsetLat[nc] = attuale + passo;
+  });
+
+  // ── Fase 2: risoluzione urti residui ──────────────────────────────
+  // Il sistema a due corsie (interno/esterno) gestisce bene un sorpasso
+  // singolo, ma con 3+ cavalli ammassati (es. gli ultimi del gruppo,
+  // spinti dal boost anti-doppiaggio) può non bastare: due di loro possono
+  // finire assegnati alla stessa corsia nello stesso momento. Questa
+  // passata finale scosta direttamente la posizione (non solo il target)
+  // di ogni coppia ancora troppo vicina — sia in avanzamento che
+  // lateralmente — così due cavalli non restano mai uno sopra l'altro,
+  // indipendentemente da quanti sono ammassati insieme.
+  const distMinimaVisiva = s.bandW * 0.24;    // ~ingombro laterale di due cavalli affiancati
+  const distProgressoRischio = 0.010;         // sotto questa distanza (in giri) sono troppo vicini longitudinalmente
+  const idx = {};
+  s.contrade.forEach((nc, i) => { idx[nc] = i; });
+
+  for (let iter = 0; iter < 3; iter++) {      // un paio di passate bastano a stabilizzare anche gruppi di 3-4
+    s.contrade.forEach(nc => {
+      s.contrade.forEach(altro => {
+        if (altro === nc) return;
+        const dProg = Math.abs((s.progresso[altro]||0) - (s.progresso[nc]||0));
+        if (dProg >= distProgressoRischio) return;
+        const oNc = s.offsetLat[nc] || 0;
+        const oAltro = s.offsetLat[altro] || 0;
+        const dLat = oNc - oAltro;
+        const overlap = distMinimaVisiva - Math.abs(dLat);
+        if (overlap <= 0) return;
+        // Se sono esattamente allineati (dLat=0), rompi la simmetria in modo
+        // deterministico usando l'ordine delle contrade, così non "tremano"
+        // indecisi su che lato andare.
+        const segno = dLat !== 0 ? Math.sign(dLat) : (idx[nc] < idx[altro] ? -1 : 1);
+        const spostamento = overlap * 0.5;
+        s.offsetLat[nc] = Math.max(-semiLarghezza, Math.min(semiLarghezza, oNc + segno*spostamento));
+      });
+    });
+  }
+}
+
+/* ─────────────────────────────────────────────
    RENDER CORSA PALIO — simulazione animata
 ───────────────────────────────────────────── */
 function renderCorsaPalio(tipoPalio) {
@@ -3230,12 +3470,17 @@ function inizializzaCanvasPalio(corsaJSON) {
     canvas, ctx, percorso, corsa, contrade, nGiocatore, tipoPalio, modalita,
     W, H,
     paletteCavalli,
+    bandW: Math.max(14, W * 0.085),            // larghezza pista, stessa formula del disegno
+    segnoNormale: segnoNormaleEsterna(percorso), // verso della normale (interno/esterno)
     fase: 'attesa',       // 'attesa' | 'correndo' | 'fine'
     giroCorrente: 0,      // 0-based
     totalGiri: 3,
     progresso: {},        // { nomeContrada: frazione [0,1] per giro corrente }
     velocita: {},         // velocità istantanee (random basate su classifica)
     posizioniFinali: {},  // progressi cumulativi (0..totalGiri)
+    offsetLat: {},         // scostamento laterale ATTUALE di ogni cavallo (sorpassi)
+    offsetTarget: {},      // scostamento verso cui si sta muovendo
+    latoSorpasso: {},      // 'interno' | 'esterno' | null — fissa la scelta per tutta la manovra
     frame: 0,
     classificaGiri: corsa.classificaGiri,
     classificaFinale: corsa.classificaFinale,
@@ -3248,6 +3493,9 @@ function inizializzaCanvasPalio(corsaJSON) {
     window._palioAnimState.progresso[nc] = -i * 0.012; // scarto iniziale simulando l'ordine al canapo
     window._palioAnimState.velocita[nc] = 1;
     window._palioAnimState.posizioniFinali[nc] = 0;
+    window._palioAnimState.offsetLat[nc] = 0;
+    window._palioAnimState.offsetTarget[nc] = 0;
+    window._palioAnimState.latoSorpasso[nc] = null;
   });
 
   // Disegna schermata di attesa
@@ -3481,14 +3729,15 @@ function disegnaFramePalio() {
 
   disegnaPistaVuota(ctx, percorso, W, H);
 
-  // Posizioni con offset per evitare sovrapposizione
+  // Posizioni: linea centrale + scostamento laterale (sorpassi interno/esterno)
+  // per evitare che due cavalli affiancati si sovrappongano visivamente.
   const posXY = {};
   contrade.forEach(nc => {
     const cum = st.progresso[nc] || 0;
-    // Chi ha già completato i 3 giri resta fermo al traguardo (frazione 0)
+    // Chi ha già completato i 3 giri resta fermo al traguardo (frazione 0, sulla linea centrale)
     const fraz = cum >= st.totalGiri ? 0 : ((cum % 1) + 1) % 1;
-    const pt = posizioneAlPercorso(percorso, fraz);
-    posXY[nc] = pt;
+    const offset = cum >= st.totalGiri ? 0 : (st.offsetLat[nc] || 0);
+    posXY[nc] = posizioneConScarto(percorso, fraz, offset, st.segnoNormale);
   });
 
   // Dimensione pallini/cavalli: proporzionali alla larghezza pista (piccoli, realistici)
@@ -3538,7 +3787,12 @@ window.avviaSimulazionePalio = function() {
   st.ultimoTS = null;
   // Progressi cumulativi: 0 = inizio, 3.0 = fine (3 giri completi)
   // Inizializza con piccolo offset per l'ordine al canapo
-  st.contrade.forEach((nc,i)=>{ st.progresso[nc] = -i*0.008; });
+  st.contrade.forEach((nc,i)=>{
+    st.progresso[nc] = -i*0.008;
+    st.offsetLat[nc] = 0;
+    st.offsetTarget[nc] = 0;
+    st.latoSorpasso[nc] = null;
+  });
 
   aggiornaVelocitaGiro(st, 0);
 
@@ -3558,13 +3812,16 @@ window.avviaSimulazionePalio = function() {
     s.contrade.forEach(nc => {
       let vel = s.velocita[nc];
 
-      // Anti-doppiaggio robusto: mantieni tutti entro 0.5 giri dal leader.
-      // Oltre quella soglia la velocità viene forzata a un multiplo crescente,
-      // garantendo che nessun pallino venga mai doppiato visivamente.
+      // Anti-doppiaggio robusto: mantieni tutti entro un certo distacco dal leader.
+      // La correzione scatta PRIMA (soglia più bassa) ma con un boost più
+      // contenuto e graduale: così il recupero è più dolce e la logica dei
+      // sorpassi (aggiornaSorpassi) ha il tempo di scostare lateralmente il
+      // cavallo prima che raggiunga chi ha davanti, evitando sovrapposizioni.
+      // Il tetto massimo (1.8×) resta comunque ben sopra la velocità massima
+      // che un leader può avere (~1.66×), quindi il doppiaggio è sempre escluso.
       const distacco = progressoLeader - (s.progresso[nc] || 0);
-      if (distacco > 0.50) {
-        // Boost forte e proporzionale al ritardo: da 1.5× fino a 3×
-        const velMin = 1.5 + Math.min(1.5, (distacco - 0.50) * 3.0);
+      if (distacco > 0.30) {
+        const velMin = 1.2 + Math.min(0.6, (distacco - 0.30) * 1.5);
         vel = Math.max(vel, velMin);
       }
 
@@ -3597,6 +3854,7 @@ window.avviaSimulazionePalio = function() {
       return;
     }
 
+    aggiornaSorpassi(s, dt);
     disegnaFramePalio();
     aggiornaClassificaLive(s);
     window._palioAnimRAF = requestAnimationFrame(tick);
@@ -3809,7 +4067,7 @@ function preparaTrattaPalio(tipoPalio) {
     // Assegna un fantino diverso a ogni cavallo della gara (ciclo se fantini < cavalli in questa gara)
     const coppie = cavalli.map((c, i) => ({
       cavallo: c,
-      fantino: fantiniGara[i % fantiniGara.length]
+      fantino: statsFantino(fantiniGara[i % fantiniGara.length].nome) || fantiniGara[i % fantiniGara.length]
     }));
     return {
       numero: gIdx + 1,
@@ -4569,7 +4827,7 @@ function renderIngaggioFantino(tipoPalio) {
 
   // ── Elenco dei fantini disponibili ──
   const boxFantini = pool.map((nomeFantino, idx) => {
-    const f = FANTINI_DB.find(x => x.nome === nomeFantino);
+    const f = statsFantino(nomeFantino);
     if (!f) return '';
     const intesa = S.intesaFantini[nomeFantino] || 0;
     const colore = coloreBarraGenerica(intesa);
@@ -4678,7 +4936,7 @@ function faiOffertaFantino(tipoPalio, idx) {
   const nomeFantino = pool[idx];
   if (!nomeFantino || ing.rifiutati.includes(nomeFantino)) return;
 
-  const f = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nomeFantino) : null;
+  const f = statsFantino(nomeFantino);
   if (!f) return;
 
   const inputEl = R(`INP_OFF_${idx}`);
@@ -4809,19 +5067,33 @@ function assicuraFantiniContrade(tipoPalio) {
   const nomeFantinoGiocatore = (S.sottotipo === 'esistente')
     ? S.nome
     : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
-  const fantiniPool = (typeof FANTINI_DB !== 'undefined')
+  const poolCandidati = (typeof FANTINI_DB !== 'undefined')
     ? FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore)
     : [];
-  for (let i = fantiniPool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [fantiniPool[i], fantiniPool[j]] = [fantiniPool[j], fantiniPool[i]];
-  }
+
+  // 1) Selezione pesata dei fantini che corrono questo Palio: i "big" (media statistiche
+  //    più alta) hanno una probabilità molto più alta di essere tra i prescelti, così
+  //    non restano quasi mai esclusi dalla Carriera, pur restando teoricamente possibile.
+  const scelti = _estraiFantiniPesati(poolCandidati, partecipantiAvversari.length);
+
+  // 2) Abbinamento cavallo-fantino: tra i fantini scelti, quelli più forti hanno più
+  //    probabilità di ritrovarsi sui cavalli più forti del lotto assegnati alle contrade
+  //    avversarie (evita che un fantino di alto livello finisca per puro caso sul
+  //    cavallo peggiore del lotto).
+  const assegnazioniCavalli = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
+  const contradaCavallo = {};
+  Object.entries(assegnazioniCavalli).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
+  const vociCavalli = partecipantiAvversari.map(nc => {
+    const nomeCav = contradaCavallo[nc];
+    const cav = (nomeCav && typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(c => c.nome === nomeCav) : null;
+    return { chiave: nc, cavallo: cav };
+  });
+  const abbinamento = _assegnaFantiniACavalliPerForza(vociCavalli, scelti);
+
   datiPalio.fantiniContrade = {};
-  if (fantiniPool.length > 0) {
-    partecipantiAvversari.forEach((nc, idx) => {
-      datiPalio.fantiniContrade[nc] = fantiniPool[idx % fantiniPool.length];
-    });
-  }
+  partecipantiAvversari.forEach((nc, idx) => {
+    datiPalio.fantiniContrade[nc] = abbinamento[nc] || scelti[idx % Math.max(1, scelti.length)] || null;
+  });
   salvaCorrente();
 }
 
@@ -4873,9 +5145,10 @@ function costruisciCoppieProvePalio(tipoPalio) {
 
     let fan;
     if (isMe && nomeFantinoGiocatore && typeof FANTINI_DB !== 'undefined') {
-      fan = FANTINI_DB.find(f => f.nome === nomeFantinoGiocatore) || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
+      fan = statsFantino(nomeFantinoGiocatore) || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
     } else {
-      fan = fantiniContrade[nomeContrada] || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
+      const fObjRivale = fantiniContrade[nomeContrada];
+      fan = (fObjRivale && statsFantino(fObjRivale.nome)) || fObjRivale || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
     }
 
     if (isMe) {
@@ -5474,13 +5747,14 @@ function renderAccordiPalio(tipoPalio) {
     // Dati fantino
     let fantinoHtml = '';
     if (fantinoObj) {
+      const statFan = statsFantino(fantinoObj.nome) || fantinoObj;
       fantinoHtml = `
         <div style="padding:8px 0 4px;border-top:1px solid rgba(200,153,30,.1);margin-top:6px">
           <div style="font-family:var(--fn);font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:rgba(200,153,30,.38);margin-bottom:5px">🏇 Fantino</div>
           <div style="font-family:var(--fn);font-size:12px;font-weight:700;color:var(--ocra-l);margin-bottom:6px">${fantinoObj.nome}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px">
-            <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Bravura</span>${pallinistat(fantinoObj.bravura)}</div>
-            <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Esperienza</span>${pallinistat(fantinoObj.esperienza)}</div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Bravura</span>${pallinistat(statFan.bravura)}</div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Esperienza</span>${pallinistat(statFan.esperienza)}</div>
             <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Gest. mossa</span>${pallinistat(fantinoObj.gestione_mossa)}</div>
             <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--fn);font-size:9px;color:rgba(200,153,30,.45);width:64px">Empatia</span>${pallinistat(fantinoObj.empatia)}</div>
           </div>
@@ -5755,7 +6029,7 @@ function renderTatticaPalio(tipoPalio) {
 
   let fantinoHtml = '';
   if (nomeFantino) {
-    const fantinoObj = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(f => f.nome === nomeFantino) : null;
+    const fantinoObj = statsFantino(nomeFantino);
     fantinoHtml = `
     <div class="card" style="margin-bottom:14px">
       <div class="card-title">Il tuo Fantino</div>
@@ -7088,6 +7362,7 @@ function renderContattaFantini(){
     const intesa = S.intesaFantini[f.nome];
     const colore = coloreBarraGenerica(intesa);
     const visitaDisabilitata = visiteRimaste <= 0;
+    const stat = statsFantino(f.nome) || f;
     return `
     <div class="card" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
@@ -7102,11 +7377,11 @@ function renderContattaFantini(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Bravura</span>
-          ${pallinistat(f.bravura)}
+          ${pallinistat(stat.bravura)}
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Esperienza</span>
-          ${pallinistat(f.esperienza)}
+          ${pallinistat(stat.esperienza)}
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Gest. mossa</span>
@@ -7158,7 +7433,7 @@ function eseguiVisitaFantino(nomeFantino){
     mostraPopupErrore('Oro insufficiente', `Andare a trovare un fantino costa ${COSTO_VISITA_FANTINO} oro. Al momento ne possiedi ${S.oro}.`);
     return;
   }
-  const f = FANTINI_DB.find(x=>x.nome===nomeFantino);
+  const f = statsFantino(nomeFantino);
   if(!f) return;
 
   S.oro -= COSTO_VISITA_FANTINO;
@@ -7282,7 +7557,7 @@ function pescaCasualiUnici(lista, n){
 
 function generaCorsaProvinciaMese(){
   if(typeof FANTINI_DB === 'undefined' || typeof CAVALLI_DB === 'undefined') return null;
-  const fantiniScelti = pescaCasualiUnici(FANTINI_DB, 12);
+  const fantiniScelti = pescaCasualiUnici(FANTINI_DB, 12).map(f => statsFantino(f.nome) || f);
   const cavalliScelti = pescaCasualiUnici(CAVALLI_DB, 12);
   const coppie = fantiniScelti.map((f,i)=>({ fantino:f, cavallo:cavalliScelti[i] }));
 
@@ -7730,6 +8005,57 @@ function renderObiettiviFantino(){
   `);
 }
 
+/* ── Albo d'oro: elenco delle vittorie ottenute dal giocatore, valido sia per
+   la Carriera Capitano (Palio vinto con fantino/cavallo) sia per la Carriera
+   Fantino (Palio vinto con contrada/cavallo). I dati vengono registrati in
+   S.alboDoro al momento della vittoria (vedi renderFasePalio/'vincitore' e
+   renderVincitorePalioFantino). ── */
+function renderAlboDoro(){
+  if(!S) return;
+  const eFantino = S.tipo === 'fantino';
+  const vittorie = (S.alboDoro || []).slice().reverse();
+
+  const righeVittorie = vittorie.map(v => {
+    const cavallo = v.cavallo || '?';
+    const chiSottotitolo = eFantino
+      ? `Contrada ${v.contrada || '?'}`
+      : (v.fantino || '?');
+    return `
+    <div class="card" style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:22px;flex-shrink:0">🏆</div>
+        <div style="flex:1">
+          <div style="font-family:var(--fn);font-size:13px;font-weight:700;color:var(--ocra-l)">${v.mese} ${v.anno}</div>
+          <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.6);margin-top:2px">${chiSottotitolo} su ${cavallo}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const corpo = vittorie.length ? righeVittorie : `
+    <div class="card" style="text-align:center;padding:20px 16px">
+      <div style="font-size:28px;margin-bottom:8px">🏳️</div>
+      <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45)">
+        ${eFantino ? 'Non hai ancora vinto un Palio in questa carriera.' : 'La tua contrada non ha ancora vinto un Palio in questa carriera.'}
+      </div>
+    </div>`;
+
+  setMain(`
+  <div>
+    <div class="hdr">
+      <button class="hdr-back" onclick="${eFantino ? 'renderGiocoFantino()' : 'renderGiocoCapitano()'}">‹</button>
+      <span class="hdr-title">Albo d'oro</span>
+      <span class="hdr-right" style="font-size:10px">🏆 ${vittorie.length}</span>
+    </div>
+    <div class="pad fade-in">
+      <div class="screen-title" style="margin-top:8px">🏆 ${eFantino ? 'Le tue vittorie' : 'Le vittorie della Contrada'}</div>
+      <div class="screen-sub">${vittorie.length} Pali${vittorie.length===1?'o':'i'} vint${vittorie.length===1?'o':'i'} in questa carriera</div>
+      ${corpo}
+    </div>
+  </div>
+  `);
+}
+
 /* ═══════════════════════════════════════════════
    SETUP FANTINO — scelta tipo
 ═══════════════════════════════════════════════ */
@@ -7840,7 +8166,7 @@ function renderNuovoFantino(){
         <div class="card-title">Identità del Fantino</div>
         <div class="inp-label">Soprannome</div>
         <input id="INP_NOME_FAN" class="inp" type="text" maxlength="25"
-          placeholder="es. Brio, Veleno, Tempesta…"
+          placeholder="es. Aceto, Veleno, Tempesta…"
           autocomplete="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="card">
@@ -7898,6 +8224,7 @@ function iniziaCarreraFantinoNuovo(){
     amiciziaFantini: amiciziaFantiniIniziale,
     amiciziaFantiniMese: 0,
     intesaContrade: intesaContradeIniziale,
+    fantiniStats: inizializzaFantiniStats(),
     incontriContradeMese: 0,
     corsaProvinciaMese: null,
     corseProvinciaAnnullateMese: false,
@@ -7918,6 +8245,7 @@ function iniziaCarreraFantinoNuovo(){
     estrazionePalioInCorso: null,
     palioCorsi: 0,
     obiettiviCompletati: {},
+    alboDoro: [],
     log: [`Inizio carriera come fantino soprannominato "${nome}". Nessuna contrada, solo la pista.`]
   };
   salvaCorrente();
@@ -8093,6 +8421,7 @@ function iniziaCarreraFantinoEsistente(idx){
     amiciziaFantini: amiciziaFantiniIniziale,
     amiciziaFantiniMese: 0,
     intesaContrade: intesaContradeIniziale,
+    fantiniStats: inizializzaFantiniStats(),
     incontriContradeMese: 0,
     corsaProvinciaMese: null,
     corseProvinciaAnnullateMese: false,
@@ -8113,6 +8442,7 @@ function iniziaCarreraFantinoEsistente(idx){
     estrazionePalioInCorso: null,
     palioCorsi: 0,
     obiettiviCompletati: {},
+    alboDoro: [],
     log: [`Inizio carriera nei panni di ${nome}. La leggenda continua sul tufo senese.`]
   };
   salvaCorrente();
@@ -8144,7 +8474,7 @@ function renderGiocoFantino(){
 
   const sottotipoLabel = S.sottotipo === 'esistente'
     ? `Fantino storico${S.nomeCompleto && S.nomeCompleto !== S.nome ? ' · ' + S.nomeCompleto : ''}`
-    : 'Fantino libero';
+    : 'Fantino';
 
   const nomeMese = MESI_CAPITANO[S.mese-1];
   const ultimoMese = S.mese === MESI_CAPITANO.length; // Agosto
@@ -8242,6 +8572,15 @@ function renderGiocoFantino(){
         <div>
           <div class="sec-btn-label">Obiettivi</div>
           <div class="sec-btn-sub">Le mete della tua carriera per questa annata</div>
+        </div>
+        <span class="sec-btn-chev">›</span>
+      </button>
+
+      <button class="sec-btn" onclick="renderAlboDoro()">
+        <span class="sec-btn-icon">🏆</span>
+        <div>
+          <div class="sec-btn-label">Albo d'oro</div>
+          <div class="sec-btn-sub">Tutti i Palii vinti nella tua carriera</div>
         </div>
         <span class="sec-btn-chev">›</span>
       </button>
@@ -9068,6 +9407,7 @@ function renderFantiniRivali(){
     const amicizia = S.amiciziaFantini[f.nome];
     const colore = coloreBarraGenerica(amicizia);
     const azioneDisabilitata = azioniRimaste <= 0;
+    const stat = statsFantino(f.nome) || f;
     return `
     <div class="card" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
@@ -9082,11 +9422,11 @@ function renderFantiniRivali(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Bravura</span>
-          ${pallinistat(f.bravura)}
+          ${pallinistat(stat.bravura)}
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Esperienza</span>
-          ${pallinistat(f.esperienza)}
+          ${pallinistat(stat.esperienza)}
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);width:62px">Gest. mossa</span>
@@ -9914,7 +10254,7 @@ function iniziaCorsaProvinciaFantino(partecipa){
    coppia generata (mantenendo così 12 coppie totali in 4 batterie da 3). */
 function generaCorsaProvinciaMeseFantino(giocatorePartecipa){
   if(typeof FANTINI_DB === 'undefined' || typeof CAVALLI_DB === 'undefined') return null;
-  const fantiniScelti = pescaCasualiUnici(FANTINI_DB.filter(f=>f.nome !== S.nome), giocatorePartecipa ? 11 : 12);
+  const fantiniScelti = pescaCasualiUnici(FANTINI_DB.filter(f=>f.nome !== S.nome), giocatorePartecipa ? 11 : 12).map(f => statsFantino(f.nome) || f);
   const poolCavalli = CAVALLI_DB.filter(c=>{
     const posseduto = S.cavalliPosseduti && S.cavalliPosseduti.includes(c.nome);
     if(!posseduto) return true;
@@ -10320,7 +10660,7 @@ function preparaTrattaPalioFantino(tipoPalio){
         const fantinoGiocatore = { nome:S.nome, bravura:S.bravura, esperienza:S.esperienza, gestione_mossa:S.gestioneMossa, empatia:S.empatia };
         return { cavallo:c, fantino:fantinoGiocatore, giocatore:true };
       }
-      return { cavallo:c, fantino:fantiniGara[i % fantiniGara.length] };
+      return { cavallo:c, fantino:(statsFantino(fantiniGara[i % fantiniGara.length].nome) || fantiniGara[i % fantiniGara.length]) };
     });
 
     return { numero:gIdx+1, coppie, risultato:null, completata:false, giocatore:eBatteriaGiocatore };
@@ -11044,7 +11384,7 @@ function costruisciCoppieProveFantino(tipoPalio){
       fantino = { nome:'Tu', bravura:S.bravura||1, esperienza:S.esperienza||1, gestione_mossa:S.gestioneMossa||1, empatia:S.empatia||1 };
     } else {
       const nomeFan = fantiniRivali[nomeContrada];
-      const f = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nomeFan) : null;
+      const f = statsFantino(nomeFan);
       fantino = f || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
     }
 
@@ -11450,10 +11790,27 @@ function preparaAccordiFantiniRivali(tipoPalio){
       ? S.nome
       : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
     const poolSenzaGiocatore = FANTINI_DB.filter(f => f.nome !== nomeFantinoGiocatore);
+    // 1) Selezione pesata: i fantini più forti hanno molte più probabilità di essere tra
+    //    i prescelti per il Palio (non restano quasi mai esclusi dalla Carriera).
     const scelti = _estraiFantiniPesati(poolSenzaGiocatore, contradeRivali.length);
+
+    // 2) Tra i fantini scelti, quelli più forti hanno più probabilità di ritrovarsi sui
+    //    cavalli più forti del lotto assegnati alle contrade rivali (evita che un top
+    //    fantino finisca per puro caso sul cavallo peggiore del lotto).
+    const assegnazioniCavalli = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
+    const contradaCavallo = {};
+    Object.entries(assegnazioniCavalli).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
+    const vociCavalli = contradeRivali.map(nomeContrada => {
+      const nomeCav = contradaCavallo[nomeContrada];
+      const cav = (nomeCav && typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(c => c.nome === nomeCav) : null;
+      return { chiave: nomeContrada, cavallo: cav };
+    });
+    const abbinamento = _assegnaFantiniACavalliPerForza(vociCavalli, scelti);
+
     const assegnazione = {};
     contradeRivali.forEach((nomeContrada, i) => {
-      assegnazione[nomeContrada] = scelti[i % scelti.length].nome;
+      const f = abbinamento[nomeContrada] || scelti[i % scelti.length];
+      assegnazione[nomeContrada] = f.nome;
     });
     datiPalio.fantiniRivaliAccordi = assegnazione;
     salvaCorrente();
@@ -11466,7 +11823,50 @@ function preparaAccordiFantiniRivali(tipoPalio){
 }
 
 function _mediaStatFantinoRivale(f){
-  return ((f.bravura||1) + (f.esperienza||1) + (f.gestione_mossa||1) + (f.empatia||1)) / 4;
+  const st = (f && f.nome) ? (statsFantino(f.nome) || f) : f;
+  return ((st.bravura||1) + (st.esperienza||1) + (st.gestione_mossa||1) + (st.empatia||1)) / 4;
+}
+
+/* Forza complessiva di un cavallo (media delle sue statistiche principali), usata per
+   stabilire quali sono i cavalli migliori del lotto ai fini dell'abbinamento con i fantini. */
+function _forzaCavalloLotto(cav){
+  if(!cav) return 3;
+  return ((cav.velocita||3) + (cav.resistenza||3) + (cav.accelerazione||3) + (cav.tenuta_curva||3)) / 4;
+}
+
+/* Abbina un gruppo di fantini già selezionati (es. tramite _estraiFantiniPesati, che
+   garantisce che i "big" come Tittia siano quasi sempre tra i prescelti) ai cavalli delle
+   contrade avversarie, in modo che i fantini più forti abbiano più probabilità di montare
+   i cavalli più forti del lotto — proprio come accade nella realtà, dove le contrade con un
+   buon cavallo cercano di ingaggiare un fantino di livello, ed è quindi molto improbabile
+   (anche se non impossibile) che un top fantino finisca sul cavallo peggiore del lotto.
+   riceve: vociCavalli = [{ chiave: nomeContrada, cavallo: oggettoCavallo }], fantiniScelti = [oggettoFantino,...]
+   restituisce: { nomeContrada: oggettoFantino } */
+function _assegnaFantiniACavalliPerForza(vociCavalli, fantiniScelti){
+  const ESPONENTE_PESO_ABBINAMENTO = 4; // più alto = correlazione più marcata forza cavallo/fantino
+  const cavOrdinati = vociCavalli.slice().sort((a, b) => _forzaCavalloLotto(b.cavallo) - _forzaCavalloLotto(a.cavallo));
+  const candidati = fantiniScelti.slice();
+  const risultato = {};
+
+  cavOrdinati.forEach(voce => {
+    if (!candidati.length) return;
+    // Estrazione pesata sui fantini ancora liberi: quello messo peggio tra i migliori
+    // rimasti ha comunque una piccola chance, ma statisticamente vince il più forte,
+    // così il cavallo di testa in questa iterazione (dal più forte al più debole) si
+    // aggiudica con più probabilità il fantino di maggior valore ancora disponibile.
+    const pesi = candidati.map(f => Math.pow(Math.max(_mediaStatFantinoRivale(f), 0.1), ESPONENTE_PESO_ABBINAMENTO));
+    const totale = pesi.reduce((a, b) => a + b, 0);
+    let r = Math.random() * totale;
+    let idx = candidati.length - 1;
+    for (let i = 0; i < pesi.length; i++) {
+      r -= pesi[i];
+      if (r <= 0) { idx = i; break; }
+    }
+    risultato[voce.chiave] = candidati[idx];
+    candidati.splice(idx, 1);
+  });
+
+  return risultato;
 }
 
 /* Estrazione pesata di n fantini (senza ripetizioni) dal pool passato: i fantini con
@@ -11517,7 +11917,7 @@ function renderAccordiFantiniRivali(tipoPalio){
   const boxHtml = contradeRivali.map((nomeContrada, idx) => {
     const cd = CONTRADE.find(c => c.nome === nomeContrada);
     const nomeFantino = assegnazione[nomeContrada];
-    const f = FANTINI_DB.find(x => x.nome === nomeFantino);
+    const f = statsFantino(nomeFantino);
     if(!f) return '';
     const amicizia = (S.amiciziaFantini[nomeFantino] !== undefined) ? S.amiciziaFantini[nomeFantino] : 50;
     const media = _mediaStatFantinoRivale(f);
@@ -11623,7 +12023,7 @@ function offriAccordoFantinoRivale(tipoPalio, nomeContrada, idx){
   if(datiPalio.accordiFantiniRivali[nomeContrada]) return; // già deciso
 
   const nomeFantino = datiPalio.fantiniRivaliAccordi[nomeContrada];
-  const f = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nomeFantino) : null;
+  const f = statsFantino(nomeFantino);
   if(!f) return;
 
   const input = R('OFFERTA_FAN_'+idx);
@@ -12356,7 +12756,7 @@ function avviaMossaCorsaFantino(tipoPalio){
       fantino = { nome:'Tu', bravura:S.bravura||1, esperienza:S.esperienza||1, gestione_mossa:S.gestioneMossa||1, empatia:S.empatia||1 };
     } else {
       const nomeFan = fantiniRivali[nomeContrada];
-      const f = (typeof FANTINI_DB !== 'undefined') ? FANTINI_DB.find(x => x.nome === nomeFan) : null;
+      const f = statsFantino(nomeFan);
       fantino = f || { nome:'Fantino', bravura:3, esperienza:3, gestione_mossa:3, empatia:3 };
     }
     return { cavallo, fantino, giocatore };
@@ -12526,6 +12926,10 @@ function renderVincitorePalioFantino(tipoPalio){
     }
     if(!datiPalio.accoppiataVincente){
       datiPalio.accoppiataVincente = estraiAccoppiataVincentePalioAssente();
+      // Palio simulato: solo il fantino vincente ottiene +1 Bravura/+1 Esperienza.
+      if (datiPalio.accoppiataVincente && datiPalio.accoppiataVincente.fantino) {
+        applicaVariazioneStatFantino(datiPalio.accoppiataVincente.fantino.nome, +1);
+      }
       salvaCorrente();
     }
     const vincitore = datiPalio.vincitore;
@@ -12609,6 +13013,12 @@ function renderVincitorePalioFantino(tipoPalio){
       completaObiettivoDiretto(OBIETTIVI_FANTINO, tipoPalio === 'luglio' ? 'vinci_luglio' : 'vinci_agosto', 'fama');
       const idVinciContrada = MAPPA_OBIETTIVO_VINCI_CONTRADA[contradaGiocatore];
       if(idVinciContrada) completaObiettivoDiretto(OBIETTIVI_FANTINO, idVinciContrada, 'fama');
+
+      // Registra la vittoria nell'Albo d'oro della carriera Fantino.
+      if (!S.alboDoro) S.alboDoro = [];
+      const assegnazioniVittoriaFan = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
+      const cavalloVincitoreFan = Object.keys(assegnazioniVittoriaFan).find(cav => assegnazioniVittoriaFan[cav] === contradaGiocatore) || null;
+      S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'fantino', contrada: contradaGiocatore, cavallo: cavalloVincitoreFan });
     } else if(suiPodio){
       S.log.push(`Piazzamento al ${piazzamento}° posto al Palio di ${nomePalio} ${S.anno}: nessun effetto su fama, intesa o statistiche.`);
     } else {
@@ -12627,6 +13037,12 @@ function renderVincitorePalioFantino(tipoPalio){
       S.log.push(`Piazzamento al ${piazzamento||'?'}° posto al Palio di ${nomePalio} ${S.anno}: Fama −5, Intesa Contrada del ${contradaGiocatore} −10, Intesa con le altre 16 contrade +10, Esperienza −1, Bravura −1, Empatia −1.`);
     }
     if(premioOro > 0) S.log.push(`Premio piazzamento (${piazzamento}° posto): +${premioOro} oro.`);
+
+    // Evoluzione statistiche degli altri fantini in corsa (il giocatore è escluso:
+    // la sua variazione Bravura/Esperienza/Empatia è già gestita sopra).
+    if (corsa && classifica) {
+      applicaEvoluzioneFantiniPalio(classifica, corsa.coppie, contradaGiocatore);
+    }
 
     // Valuta l'esito dell'istruzione del capitano (se presente)
     if(typeof valutaStrategiaCapitanoFantino === 'function'){
