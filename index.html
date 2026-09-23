@@ -3906,6 +3906,34 @@ function aggiornaClassificaLive(st) {
   });
 }
 
+/* Restituisce l'accoppiata cavallo/fantino con cui una contrada corre un Palio,
+   la stessa già mostrata nelle Prove.
+   - Carriera Capitano: fantino del giocatore = fantino ingaggiato (o il proprio, se
+     fantino esistente); fantini avversari da datiPalio.fantiniContrade.
+   - Carriera Fantino: il giocatore è "tu"; fantini avversari da datiPalio.fantiniRivaliAccordi.
+   Il cavallo viene sempre dall'assegnazione del lotto. */
+function accoppiataPalioContrada(datiPalio, nomeContrada, eFantino) {
+  if (!datiPalio) return { cavallo: null, fantino: null, isTu: false };
+  const assegnazioni = (datiPalio.assegnazione && datiPalio.assegnazione.assegnazioni) || {};
+  const nomeCavallo = Object.keys(assegnazioni).find(cav => assegnazioni[cav] === nomeContrada) || null;
+  let nomeFantino = null, isTu = false;
+  if (eFantino) {
+    if (nomeContrada === datiPalio.contradaFantino) { isTu = true; }
+    else {
+      const f = (datiPalio.fantiniRivaliAccordi || {})[nomeContrada];
+      nomeFantino = (f && f.nome) ? f.nome : (f || null);
+    }
+  } else if (S && S.contrada && nomeContrada === S.contrada.nome) {
+    nomeFantino = (S.sottotipo === 'esistente')
+      ? S.nome
+      : (datiPalio.ingaggio ? datiPalio.ingaggio.ingaggiato : null);
+  } else {
+    const f = (datiPalio.fantiniContrade || {})[nomeContrada];
+    nomeFantino = f ? (f.nome || f) : null;
+  }
+  return { cavallo: nomeCavallo, fantino: nomeFantino, isTu };
+}
+
 function mostraRisultatoFinale(st) {
   const corsa = st.corsa;
   const nGiocatore = st.nGiocatore;
@@ -3925,15 +3953,22 @@ function mostraRisultatoFinale(st) {
   const divBtn = document.getElementById('BTN_CORSA_WRAP');
   if (!divBtn) return;
 
+  const datiPalioFinale = tipoPalio === 'luglio' ? S.palioLuglioAnno : S.palioAgostoAnno;
   const righeFinali = corsa.classificaFinale.map((nc, idx) => {
     const isMe = nc === nGiocatore;
+    const acc = accoppiataPalioContrada(datiPalioFinale, nc, eFantino);
+    const testoAccoppiata = (acc.cavallo || acc.fantino || acc.isTu)
+      ? `<span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.45)"> — 🐎 ${acc.cavallo || 'Cavallo'} · 🏇 ${acc.isTu ? '<strong style="color:var(--verde)">tu</strong>' : (acc.fantino || 'Fantino')}</span>`
+      : '';
     const premio = tabellaPremi[idx] || 0;
     const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':`${idx+1}°`;
     const id = 'rf_'+nc.replace(/\s/g,'_');
     return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(200,153,30,.08)">
       <span style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);width:24px">${medal}</span>
       <canvas id="${id}" width="18" height="18" style="border-radius:50%;flex-shrink:0"></canvas>
-      <span style="font-family:var(--fn);font-size:12px;font-weight:${isMe?'700':'400'};color:${isMe?'var(--ocra)':'var(--ocra-l)'};flex:1">${nc}${isMe?' (tu)':''}</span>
+      <div style="flex:1;min-width:0">
+        <span style="font-family:var(--fn);font-size:12px;font-weight:${isMe?'700':'400'};color:${isMe?'var(--ocra)':'var(--ocra-l)'}">${nc}${isMe?' (tu)':''}</span>${testoAccoppiata}
+      </div>
       ${premio>0?`<span style="font-family:var(--fn);font-size:10px;color:var(--verde);font-weight:700">+${premio}💰</span>`:''}
     </div>`;
   }).join('');
@@ -8020,10 +8055,16 @@ function renderAlboDoro(){
     const chiSottotitolo = eFantino
       ? `Contrada ${v.contrada || '?'}`
       : (v.fantino || '?');
+    const datiContradaAlbo = eFantino ? CONTRADE.find(c => c.nome === v.contrada) : null;
+    const iconaAlbo = datiContradaAlbo
+      ? `<img src="${IMG_BASE}${datiContradaAlbo.img}" alt="${datiContradaAlbo.nome}"
+             style="width:34px;height:34px;object-fit:contain;border-radius:4px;background:rgba(0,0,0,.2);border:var(--bord);flex-shrink:0"
+             onerror="this.style.opacity='.15'">`
+      : `<div style="font-size:22px;flex-shrink:0">🏆</div>`;
     return `
     <div class="card" style="margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:10px">
-        <div style="font-size:22px;flex-shrink:0">🏆</div>
+        ${iconaAlbo}
         <div style="flex:1">
           <div style="font-family:var(--fn);font-size:13px;font-weight:700;color:var(--ocra-l)">${v.mese} ${v.anno}</div>
           <div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.6);margin-top:2px">${chiSottotitolo} su ${cavallo}</div>
@@ -8854,13 +8895,26 @@ const SOGLIA_RIVALITA_INTESA = 85;
 
 /* ── Regola di rivalità tra le contrade (Carriera Fantino) ──
    Se l'intesa con una contrada raggiunge 85 o più, l'intesa con la sua
-   contrada rivale storica (presa da RAPPORTI_CONTRADE, la stessa mappa usata
-   a inizio Carriera Capitano) crolla immediatamente a 0. Finché l'intesa con
+   contrada rivale (presa da RAPPORTI_INTESA_FANTINO, derivata da RAPPORTI_CONTRADE
+   con la coppia Onda/Torre invertita) crolla immediatamente a 0. Finché l'intesa con
    la prima contrada resta a 85 o più, non è possibile alzare l'intesa con la
    rivale: i relativi tasti "Incontra" e "Accordo" restano disattivati. */
+/* Mappa delle rivalità usata SOLO per l'intesa con le contrade (Carriera Fantino).
+   È derivata da RAPPORTI_CONTRADE, con un'unica differenza: la coppia Onda/Torre
+   è a senso unico e invertita. Se l'intesa con la Torre è a 85+, l'intesa con
+   l'Onda crolla a 0; se invece l'intesa con l'Onda è a 85+, l'intesa con la
+   Torre resta invariata. */
+const RAPPORTI_INTESA_FANTINO = (function(){
+  const m = {};
+  Object.keys(RAPPORTI_CONTRADE).forEach(n=>{ m[n] = { rivali: RAPPORTI_CONTRADE[n].rivali.slice() }; });
+  m['Onda']  = { rivali: [] };
+  m['Torre'] = { rivali: Array.from(new Set([].concat(RAPPORTI_CONTRADE['Torre'].rivali, ['Onda']))) };
+  return m;
+})();
+
 function applicaRivalitaIntesaContrada(nomeContrada){
   if(!S || !S.intesaContrade || !nomeContrada) return;
-  const rapporto = RAPPORTI_CONTRADE[nomeContrada];
+  const rapporto = RAPPORTI_INTESA_FANTINO[nomeContrada];
   if(!rapporto || !rapporto.rivali.length) return;
   const valore = (S.intesaContrade[nomeContrada] !== undefined) ? S.intesaContrade[nomeContrada] : 50;
   if(valore >= SOGLIA_RIVALITA_INTESA){
@@ -8879,8 +8933,8 @@ function applicaRivalitaIntesaContrada(nomeContrada){
 function normalizzaRivalitaIntesaContrade(oggettoIntesa){
   const intesa = oggettoIntesa || (S && S.intesaContrade);
   if(!intesa) return;
-  Object.keys(RAPPORTI_CONTRADE).forEach(nome=>{
-    const rapporto = RAPPORTI_CONTRADE[nome];
+  Object.keys(RAPPORTI_INTESA_FANTINO).forEach(nome=>{
+    const rapporto = RAPPORTI_INTESA_FANTINO[nome];
     if(!rapporto || !rapporto.rivali.length) return;
     const valore = (intesa[nome] !== undefined) ? intesa[nome] : 50;
     if(valore >= SOGLIA_RIVALITA_INTESA){
@@ -8893,8 +8947,8 @@ function normalizzaRivalitaIntesaContrade(oggettoIntesa){
    bloccano l'aumento dell'intesa con nomeContrada perché ne è storicamente rivale. */
 function contradeCheBloccanoIntesa(nomeContrada){
   if(!S || !S.intesaContrade || !nomeContrada) return [];
-  return Object.keys(RAPPORTI_CONTRADE).filter(nome=>{
-    const r = RAPPORTI_CONTRADE[nome];
+  return Object.keys(RAPPORTI_INTESA_FANTINO).filter(nome=>{
+    const r = RAPPORTI_INTESA_FANTINO[nome];
     if(!r || !r.rivali.includes(nomeContrada)) return false;
     const v = (S.intesaContrade[nome] !== undefined) ? S.intesaContrade[nome] : 50;
     return v >= SOGLIA_RIVALITA_INTESA;
