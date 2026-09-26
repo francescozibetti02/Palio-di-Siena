@@ -3333,7 +3333,7 @@ function renderCorsaPalio(tipoPalio) {
 
       <!-- Canvas pista -->
       <div style="padding:0 10px;position:relative">
-        <canvas id="CANVAS_PALIO" style="width:82%;max-width:82%;margin:0 auto;border-radius:12px;border:1px solid rgba(200,153,30,.25);display:block"></canvas>
+        <canvas id="CANVAS_PALIO" style="width:94%;max-width:94%;margin:0 auto;border-radius:12px;border:1px solid rgba(200,153,30,.25);display:block"></canvas>
       </div>
 
       <!-- Legenda contrade -->
@@ -3404,7 +3404,7 @@ function renderCorsaPalioFantino(tipoPalio) {
 
       <!-- Canvas pista -->
       <div style="padding:0 10px;position:relative">
-        <canvas id="CANVAS_PALIO" style="width:82%;max-width:82%;margin:0 auto;border-radius:12px;border:1px solid rgba(200,153,30,.25);display:block"></canvas>
+        <canvas id="CANVAS_PALIO" style="width:94%;max-width:94%;margin:0 auto;border-radius:12px;border:1px solid rgba(200,153,30,.25);display:block"></canvas>
       </div>
 
       <!-- Legenda contrade -->
@@ -3436,10 +3436,19 @@ function inizializzaCanvasPalio(corsaJSON) {
 
   // Dimensioni: larghezza del contenitore, altezza maggiorata per una pista
   // più allungata in verticale (il Campo reale è meno "schiacciato" di un ovale largo)
-  const W = canvas.offsetWidth || 340;
+  // Il canvas contiene la pista + i palazzi che le stanno attorno: ai lati serve un margine per le
+  // facciate e i tetti, in alto si taglia un po' di spazio vuoto, in basso resta posto per Palazzo
+  // Pubblico e Torre del Mangia (da inserire). W/H restano le dimensioni della PISTA (tutta la
+  // geometria è calcolata su di esse); `off` è dove la pista si colloca dentro al canvas.
+  const Wc = canvas.offsetWidth || 340;
+  const mLat = Math.round(Wc * 0.085);
+  const W = Wc - 2 * mLat;
   const H = Math.round(W * 0.95);
-  canvas.width = W;
-  canvas.height = H;
+  const tagliaAlto = Math.round(W * 0.05);
+  const spazioBasso = Math.round(W * 0.17);   // spazio per Palazzo Pubblico + Torre del Mangia
+  const off = { x: mLat, y: -tagliaAlto };
+  canvas.width = Wc;
+  canvas.height = H - tagliaAlto + spazioBasso;
 
   const ctx = canvas.getContext('2d');
   const corsa = JSON.parse(corsaJSON);
@@ -3468,7 +3477,7 @@ function inizializzaCanvasPalio(corsaJSON) {
   // Stato interno dell'animazione
   window._palioAnimState = {
     canvas, ctx, percorso, corsa, contrade, nGiocatore, tipoPalio, modalita,
-    W, H,
+    W, H, off,
     paletteCavalli,
     bandW: Math.max(14, W * 0.085),            // larghezza pista, stessa formula del disegno
     segnoNormale: segnoNormaleEsterna(percorso), // verso della normale (interno/esterno)
@@ -3501,6 +3510,23 @@ function inizializzaCanvasPalio(corsaJSON) {
   // Disegna schermata di attesa
   disegnaPistaVuota(ctx, percorso, W, H);
   costruisciLegenda(contrade, nGiocatore);
+
+  // Anima la folla mentre la corsa non è in atto (attesa e dopo l'arrivo). Durante la corsa
+  // la ridisegna già il ciclo principale (disegnaFramePalio). Si ferma da solo se la schermata
+  // viene chiusa o se parte una nuova simulazione. un solo drawImage + al massimo una tile per fotogramma.
+  if (window._palioFollaRAF) cancelAnimationFrame(window._palioFollaRAF);
+  const stFolla = window._palioAnimState;
+  let ultimoTS = 0;
+  function loopFolla(ts) {
+    if (window._palioAnimState !== stFolla || !stFolla.canvas.isConnected) { window._palioFollaRAF = null; return; }
+    if (stFolla.fase !== 'correndo') {
+      ultimoTS = ts;
+      if (stFolla.fase === 'attesa') disegnaPistaVuota(stFolla.ctx, stFolla.percorso, stFolla.W, stFolla.H);
+      else disegnaFramePalio();
+    }
+    window._palioFollaRAF = requestAnimationFrame(loopFolla);
+  }
+  window._palioFollaRAF = requestAnimationFrame(loopFolla);
 }
 
 function costruisciLegenda(contrade, nGiocatore) {
@@ -3524,21 +3550,1002 @@ function costruisciLegenda(contrade, nGiocatore) {
   });
 }
 
-function disegnaPistaVuota(ctx, percorso, W, H) {
-  ctx.clearRect(0,0,W,H);
+/* ─────────────────────────────────────────────
+   FOLLA DELLA PIAZZA — contradaioli visti dall'alto
+   • Le persone vengono generate UNA VOLTA (seed fisso, quindi sempre uguali) su una griglia
+     esagonale con jitter, dentro la piazza, lontano dal bordo, dalla Fonte Gaia e dal bandierino.
+   • Sono raggruppate in "curve" per contrada (celle di Voronoi rilassate): ogni gruppo indossa
+     i fazzoletti dei colori della propria contrada; ognuno guarda verso la pista.
+   • Movimento sul posto, ciclico (solo seni con frequenze diverse per ciascuno): ondeggio,
+     rotazione delle spalle, saltelli (la testa si ingrandisce un attimo, come se si avvicinasse
+     alla camera) modulati da un'onda che attraversa la piazza, e qualche sbandierata.
+   • Disegno a lotti per colore (un solo path per colore): centinaia di persone a costo ridotto.
+───────────────────────────────────────────── */
+function coloriContradaFolla(nome) {
+  let def = COLORI_CONTRADE[nome];
+  if (!def) {
+    const k = Object.keys(COLORI_CONTRADE).find(k => nome && nome.toLowerCase().includes(k.toLowerCase()));
+    def = k ? COLORI_CONTRADE[k] : null;
+  }
+  if (!def) return ['#E8C830', '#CC2222'];
+  if (def.tipo === 'quadrantie') return [def.q1, def.q2];
+  if (def.tipo === 'cerchi') return [def.sfondo, def.cerchi[0].col];
+  if (def.tipo === 'istrice') return [def.sfondo, def.raggi[0]];
+  return ['#E8C830', '#CC2222'];
+}
 
-  // Sfondo: terra del Campo (color ocra scura, leggermente sfumato)
-  const bgGrad = ctx.createLinearGradient(0,0,0,H);
-  bgGrad.addColorStop(0, '#241006');
-  bgGrad.addColorStop(1, '#170A03');
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0,0,W,H);
+function costruisciFollaPiazza(interni, fonte, flag, W, contrade, esterni, H) {
+  let seed = 240924;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const TAU = Math.PI * 2;
 
-  const bandW = Math.max(14, W * 0.085); // larghezza pista proporzionale al canvas
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  interni.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+
+  const passo = Math.max(5.2, W * 0.0125);
+  const margine = passo * 1.3;
+
+  function dentroPoly(poly, px, py) {
+    let ins = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a.y > py) !== (b.y > py) && px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) ins = !ins;
+    }
+    return ins;
+  }
+  function vicinoPoly(poly, px, py) {
+    let dMin = Infinity, k = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const d = Math.hypot(poly[i].x - px, poly[i].y - py);
+      if (d < dMin) { dMin = d; k = i; }
+    }
+    return { d: dMin, k };
+  }
+  const dentro = (px, py) => dentroPoly(interni, px, py);
+  const bordoVicino = (px, py) => vicinoPoly(interni, px, py);
+
+  // Candidati su griglia esagonale con jitter
+  const cand = [];
+  const rigaH = passo * 0.87;
+  let riga = 0;
+  for (let y = minY; y <= maxY; y += rigaH, riga++) {
+    for (let x = minX + (riga % 2 ? passo / 2 : 0); x <= maxX; x += passo) {
+      const px = x + (rnd() - 0.5) * passo * 0.56;
+      const py = y + (rnd() - 0.5) * passo * 0.56;
+      if (!dentro(px, py)) continue;
+      const bv = bordoVicino(px, py);
+      if (bv.d < margine) continue;
+      if (px > fonte.x0 - margine * 0.8 && px < fonte.x0 + fonte.fw + margine * 0.8 &&
+          py > fonte.y0 - margine * 0.8 && py < fonte.y0 + fonte.fh + margine * 0.8) continue;
+      if (Math.hypot(px - flag.x, py - flag.y) < flag.r + margine * 0.5) continue;
+      cand.push({ x: px, y: py, k: bv.k });
+    }
+  }
+
+  // Gruppi per contrada: centri casuali rilassati (Lloyd) → celle di Voronoi omogenee
+  const nomi = (contrade && contrade.length) ? contrade : Object.keys(COLORI_CONTRADE).slice(0, 10);
+  const K = nomi.length;
+  const centri = [];
+  for (let i = 0; i < K; i++) { const c = cand[Math.floor(rnd() * cand.length)]; centri.push({ x: c.x, y: c.y }); }
+  for (let it = 0; it < 4; it++) {
+    const acc = centri.map(() => ({ x: 0, y: 0, n: 0 }));
+    cand.forEach(c => {
+      let b = 0, dB = Infinity;
+      centri.forEach((ce, i) => { const d = (ce.x - c.x) ** 2 + (ce.y - c.y) ** 2; if (d < dB) { dB = d; b = i; } });
+      acc[b].x += c.x; acc[b].y += c.y; acc[b].n++;
+    });
+    acc.forEach((a, i) => { if (a.n) { centri[i].x = a.x / a.n; centri[i].y = a.y / a.n; } });
+  }
+  const coloriCon = nomi.map(coloriContradaFolla);
+
+  const CAMICIE = ['#2B2B30', '#3A3F48', '#4B5563', '#6A7480', '#8E8A80', '#B8B2A5', '#2E3A4E', '#4A4038', '#5B5348', '#1F1F1F', '#7A6A58', '#9A9488'];
+  const CAPELLI = ['#1A1210', '#1A1210', '#2E1E14', '#2E1E14', '#4A3222', '#6B4A2A', '#B89A5E', '#8E8E8E', '#D8D8D8', '#C9A184'];
+  const persone = [];
+  function creaPersona(c, b, vb) {
+    // Fazzoletto: 78% della propria contrada, 10% di un'altra, 12% nessuno
+    let scarf = null, cIdx = b;
+    const r = rnd();
+    if (r < 0.78) scarf = coloriCon[b][rnd() < 0.5 ? 0 : 1];
+    else if (r < 0.88) { cIdx = Math.floor(rnd() * K); scarf = coloriCon[cIdx][rnd() < 0.5 ? 0 : 1]; }
+    // Sguardo rivolto verso la pista (bordo più vicino), con un po' di variazione
+    const sguardo = Math.atan2(vb.y - c.y, vb.x - c.x) + (rnd() - 0.5) * 1.4;
+    const bandiera = scarf && rnd() < 0.02;   // poche bandiere: privilegiano la fluidità dei cavalli
+    persone.push({
+      x: c.x, y: c.y, camicia: CAMICIE[Math.floor(rnd() * CAMICIE.length)],
+      capelli: CAPELLI[Math.floor(rnd() * CAPELLI.length)], scarf,
+      sguardo, p1: rnd() * TAU, p2: rnd() * TAU, p3: rnd() * TAU, pj: rnd() * TAU,
+      f1: 0.22 + rnd() * 0.45, f2: 0.22 + rnd() * 0.45, f3: 0.15 + rnd() * 0.30, fj: 1.1 + rnd() * 0.9,
+      saltatore: rnd() < 0.38,
+      bandiera, bCol: bandiera ? coloriCon[cIdx] : null, bTh: sguardo + (rnd() - 0.5) * 1.2,
+      bF: 0.55 + rnd() * 0.5, bP: rnd() * TAU
+    });
+  }
+  // Folla al centro della piazza
+  cand.forEach(c => {
+    let b = 0, dB = Infinity;
+    centri.forEach((ce, i) => { const d = (ce.x - c.x) ** 2 + (ce.y - c.y) ** 2; if (d < dB) { dB = d; b = i; } });
+    creaPersona(c, b, interni[c.k]);
+  });
+
+  // Palchetti: fascia UNIFORME subito fuori dalla pista, con folla rivolta verso la pista.
+  // Restano vuoti due tratti (come nella pianta): l'angolo della Mossa e la base a destra (Palazzo Pubblico).
+  // Il perimetro è diviso in "blocchi" assegnati a contrade a caso.
+  if (esterni && esterni.length) {
+    const nE = esterni.length;
+    const bandaP = Math.hypot(esterni[0].x - interni[0].x, esterni[0].y - interni[0].y); // larghezza pista
+    const dMin = bandaP * 0.10, dMax = bandaP * 0.78;
+    const vuoti = [[0.8 / 21, 1.7 / 21], [11.3 / 21, 13.55 / 21]];   // frazioni del perimetro (indici dei punti di controllo / 21)
+    const perm = nomi.map((_, i) => i).sort(() => rnd() - 0.5);
+    const nBlocchi = K * 2;
+    const mC = passo * 1.2;                                            // distanza minima dai bordi del canvas
+    let eMinX = Infinity, eMaxX = -Infinity, eMinY = Infinity, eMaxY = -Infinity;
+    esterni.forEach(p => { eMinX = Math.min(eMinX, p.x); eMaxX = Math.max(eMaxX, p.x); eMinY = Math.min(eMinY, p.y); eMaxY = Math.max(eMaxY, p.y); });
+    const x0 = Math.max(mC, eMinX - dMax), x1 = Math.min(W - mC, eMaxX + dMax);
+    const y0 = Math.max(mC, eMinY - dMax), y1 = Math.min(H - mC, eMaxY + dMax);
+    let rg = 0;
+    for (let y = y0; y <= y1; y += rigaH, rg++) {
+      for (let x = x0 + (rg % 2 ? passo / 2 : 0); x <= x1; x += passo) {
+        const px = x + (rnd() - 0.5) * passo * 0.56;
+        const py = y + (rnd() - 0.5) * passo * 0.56;
+        if (px < mC || px > W - mC || py < mC || py > H - mC) continue;
+        if (dentroPoly(esterni, px, py)) continue;
+        const v = vicinoPoly(esterni, px, py);
+        if (v.d < dMin || v.d > dMax) continue;
+        const f = v.k / nE;
+        let ok = true;
+        for (const [ga, gb] of vuoti) { if (f > ga && f < gb) { ok = false; break; } }
+        if (!ok) continue;
+        creaPersona({ x: px, y: py }, perm[Math.floor(f * nBlocchi) % K], esterni[v.k]);
+      }
+    }
+  }
+
+  // Riposizionamento manuale di un gruppo di contradaioli (richiesta): i palchettisti dentro il
+  // rettangolo GIALLO vengono spostati, con una trasformazione rigida (traslazione + rotazione, stessa
+  // dimensione), nel rettangolo VERDE; il posto originale resta vuoto. Coordinate in unità di W
+  // (H = 0.95·W), quindi valgono a qualsiasi dimensione dello schermo.
+  (function () {
+    const Q_GIALLO = [[0.0362, 0.3468], [0.1025, 0.2769], [0.1458, 0.3162], [0.0796, 0.3850]];
+    const Q_VERDE  = [[0.1076, 0.2677], [0.1958, 0.2285], [0.2198, 0.2820], [0.1443, 0.3151]];
+    function info(Q) {
+      const cx = (Q[0][0] + Q[1][0] + Q[2][0] + Q[3][0]) / 4, cy = (Q[0][1] + Q[1][1] + Q[2][1] + Q[3][1]) / 4;
+      const lx = Q[1][0] - Q[0][0], ly = Q[1][1] - Q[0][1];
+      const L = Math.hypot(lx, ly), ax = lx / L, ay = ly / L;
+      const wx = Q[2][0] - Q[1][0], wy = Q[2][1] - Q[1][1];
+      return { cx, cy, ax, ay, px: -ay, py: ax, hl: L / 2, hw: Math.hypot(wx, wy) / 2, ang: Math.atan2(ay, ax) };
+    }
+    const Y = info(Q_GIALLO), G = info(Q_VERDE);
+    const dAng = G.ang - Y.ang;
+    persone.forEach(pp => {
+      const dx = pp.x / W - Y.cx, dy = pp.y / W - Y.cy;
+      const sL = dx * Y.ax + dy * Y.ay, tL = dx * Y.px + dy * Y.py;
+      if (Math.abs(sL) > Y.hl || Math.abs(tL) > Y.hw) return;
+      pp.x = (G.cx + sL * G.ax + tL * G.px) * W;
+      pp.y = (G.cy + sL * G.ay + tL * G.py) * W;
+      pp.sguardo += dAng;
+      pp.bTh += dAng;
+    });
+  })();
+
+  // Gruppi per colore (per disegnare a lotti)
+  function raggruppa(campo, indici) {
+    const m = new Map();
+    indici.forEach(i => { const c = persone[i][campo]; if (!c) return; if (!m.has(c)) m.set(c, []); m.get(c).push(i); });
+    return [...m.entries()].map(([col, idx]) => ({ col, idx }));
+  }
+  const n = persone.length;
+  // La folla è divisa in 4 "tile" SPAZIALI (quadranti del canvas): ogni fotogramma se ne ridisegna al
+  // massimo UNA (con clip) su un unico canvas della folla, così il costo per fotogramma resta basso e
+  // costante (niente scatti sui cavalli) e la composizione finale resta di soli 2 drawImage.
+  // Le persone a cavallo tra due quadranti compaiono in entrambe le liste (tagliate dal clip).
+  const wx = Math.floor(W / 2), hy = Math.floor(H / 2);
+  const rettangoli = [[0, 0, wx, hy], [wx, 0, Math.ceil(W) - wx, hy], [0, hy, wx, Math.ceil(H) - hy], [wx, hy, Math.ceil(W) - wx, Math.ceil(H) - hy]];
+  const pad = Math.max(W * 0.0128, Math.max(7, W * 0.016) * 1.3);
+  const tile = rettangoli.map(rc => {
+    const idx = [];
+    for (let i = 0; i < n; i++) {
+      const q = persone[i];
+      if (q.x >= rc[0] - pad && q.x <= rc[0] + rc[2] + pad && q.y >= rc[1] - pad && q.y <= rc[1] + rc[3] + pad) idx.push(i);
+    }
+    return {
+      rect: rc, idx,
+      gCamicie: raggruppa('camicia', idx), gScarf: raggruppa('scarf', idx), gCapelli: raggruppa('capelli', idx),
+      bandiere: idx.filter(i => persone[i].bandiera)
+    };
+  });
+  return { persone, n, tile, PX: new Float32Array(n), PY: new Float32Array(n), PR: new Float32Array(n), J: new Float32Array(n) };
+}
+
+// Disegna UNA tile della folla (1/4 delle persone) all'istante t (secondi).
+function disegnaFollaTile(ctx, F, T, W, t) {
+  const TAU = Math.PI * 2;
+  const A = Math.max(0.5, W * 0.0011);          // ampiezza ondeggio
+  const rx = Math.max(2.4, W * 0.0080);         // semi-larghezza spalle
+  const ry = rx * 0.58;
+  const rTesta = Math.max(1.4, W * 0.0036);
+  const rScarf = rTesta * 1.30;
+  const lLungh = Math.max(7, W * 0.016);        // asta della bandiera
+
+  const { persone, PX, PY, PR, J } = F;
+
+  // Posizioni animate (tutto periodico → loop perfetto)
+  const lambda = W * 0.22;
+  for (const i of T.idx) {
+    const q = persone[i];
+    const env = 0.30 + 0.70 * (0.5 + 0.5 * Math.sin(TAU * t / 7 - (q.x + q.y) / lambda)); // onda di entusiasmo
+    const salto = q.saltatore ? Math.pow(Math.max(0, Math.sin(TAU * q.fj * t + q.pj)), 2) * env : 0;
+    PX[i] = q.x + A * Math.sin(TAU * q.f1 * t + q.p1);
+    PY[i] = q.y + A * Math.sin(TAU * q.f2 * t + q.p2);
+    PR[i] = q.sguardo + Math.PI / 2 + 0.30 * Math.sin(TAU * q.f3 * t + q.p3);
+    J[i] = salto;
+  }
+
+  ctx.save();
+  ctx.lineWidth = 0.6;
+  ctx.strokeStyle = 'rgba(0,0,0,.28)';
+
+  // 1) Spalle / abiti
+  T.gCamicie.forEach(g => {
+    ctx.beginPath();
+    g.idx.forEach(i => {
+      const k = 1 + 0.12 * J[i], a = rx * k, c = Math.cos(PR[i]), s = Math.sin(PR[i]);
+      ctx.moveTo(PX[i] + a * c, PY[i] + a * s);
+      ctx.ellipse(PX[i], PY[i], a, ry * k, PR[i], 0, TAU);
+    });
+    ctx.fillStyle = g.col; ctx.fill(); ctx.stroke();
+  });
+
+  // 2) Fazzoletti di contrada: colletto visibile dietro la testa (mezzaluna)
+  T.gScarf.forEach(g => {
+    ctx.beginPath();
+    g.idx.forEach(i => {
+      const r = rScarf * (1 + 0.28 * J[i]);
+      const dir = PR[i] + Math.PI / 2;               // direzione "dietro" rispetto allo sguardo
+      const cx = PX[i] + Math.cos(dir) * rTesta * 0.55, cy = PY[i] + Math.sin(dir) * rTesta * 0.55;
+      ctx.moveTo(cx + r, cy);
+      ctx.arc(cx, cy, r, 0, TAU);
+    });
+    ctx.fillStyle = g.col; ctx.fill();
+  });
+
+  // 3) Teste (capelli)
+  T.gCapelli.forEach(g => {
+    ctx.beginPath();
+    g.idx.forEach(i => {
+      const r = rTesta * (1 + 0.32 * J[i]);
+      ctx.moveTo(PX[i] + r, PY[i]);
+      ctx.arc(PX[i], PY[i], r, 0, TAU);
+    });
+    ctx.fillStyle = g.col; ctx.fill();
+  });
+
+  // 4) Sbandierate: asta + drappo bicolore che oscilla a destra e sinistra
+  if (T.bandiere.length) {
+    ctx.beginPath();
+    T.bandiere.forEach(i => {
+      const q = persone[i];
+      const th = q.bTh + 0.9 * Math.sin(TAU * q.bF * t + q.bP);
+      ctx.moveTo(PX[i], PY[i]);
+      ctx.lineTo(PX[i] + Math.cos(th) * lLungh, PY[i] + Math.sin(th) * lLungh);
+    });
+    ctx.strokeStyle = 'rgba(40,26,14,.9)'; ctx.lineWidth = 0.9; ctx.stroke();
+    T.bandiere.forEach(i => {
+      const q = persone[i];
+      const th = q.bTh + 0.9 * Math.sin(TAU * q.bF * t + q.bP);
+      const ux = Math.cos(th), uy = Math.sin(th), vx = -uy, vy = ux;
+      const d0 = lLungh * 0.30, wc = lLungh * 0.34;
+      const ax = PX[i] + ux * d0, ay = PY[i] + uy * d0;
+      const bx = PX[i] + ux * lLungh, by = PY[i] + uy * lLungh;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(bx + vx * wc, by + vy * wc); ctx.lineTo(ax + vx * wc, ay + vy * wc);
+      ctx.closePath(); ctx.fillStyle = q.bCol[0]; ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(bx - vx * wc, by - vy * wc); ctx.lineTo(ax - vx * wc, ay - vy * wc);
+      ctx.closePath(); ctx.fillStyle = q.bCol[1]; ctx.fill();
+    });
+  }
+  ctx.restore();
+}
+
+/* Pista: livelli in cache.
+   • base  = sfondo, pista, Fonte Gaia, bandierino (statici: disegnati UNA volta)
+   • folla = un canvas trasparente con i contradaioli; ad ogni chiamata si ridisegna al massimo un
+             quadrante (il più "vecchio", ogni ≥66 ms ≈ 15 Hz per quadrante)
+   Ogni fotogramma si riduce a 2 drawImage: il ciclo dei cavalli resta fluido. */
+function aggiornaQuadranteFolla(L, T, W, t) {
+  const c = L.fctx, [x, y, w, h] = T.def.rect;
+  c.save();
+  c.beginPath(); c.rect(x, y, w, h); c.clip();
+  c.clearRect(x, y, w, h);
+  disegnaFollaTile(c, L.F, T.def, W, t);
+  c.restore();
+}
+
+/* ─────────────────────────────────────────────
+   PALAZZI ATTORNO ALLA PIAZZA (vista dall'alto, come nella foto aerea e nella pianta di gioco)
+   • Livello statico, disegnato UNA volta per dimensione (cache in `livelli.edifici`), SOTTO pista e folla.
+   • Ogni palazzo è fatto di corpi DRITTI (rettangoli) allineati al perimetro della piazza: una fascia di
+     FACCIATA (muro, piani, finestre; vista di scorcio come se la camera fosse sopra il centro della piazza)
+     e, dietro, il TETTO a due falde (file di coppi, comignoli, lucernari). Negli angoli i corpi cambiano
+     direzione e uno "spigolo" raccorda facciata e tetto. Tra un palazzo e l'altro restano i vicoli.
+   • Dietro alla prima fila ci sono altre due file di soli tetti, così anche i margini del canvas sono coperti.
+   • Resta VUOTO il tratto in basso (stessa ampiezza del vuoto lasciato nella folla): riservato a Palazzo
+     Pubblico e Torre del Mangia, da inserire in un secondo momento.
+   • Colori dei muri presi dalle foto di riferimento: mattone rosato (lato ovest), salmone e crema (facciate
+     centrali), mattone arancio con finestre ad arco e merli (Palazzo Sansedoni), ocra.
+   • Luce da destra-in basso (in coordinate canvas): le facciate in alto sono più chiare, quelle a sinistra più scure.
+───────────────────────────────────────────── */
+function disegnaPalazzi(ctx, g) {
+  const { percorso, normali, bandW, W, H, cw, ch, off } = g;
   const n = percorso.length;
+  const TAU = Math.PI * 2;
 
-  // ─── Calcola normali smussate per ogni punto (media tra il segmento entrante e uscente) ───
-  // Questo evita spigoli vivi/fessure nei punti d'angolo del percorso.
+  // Generatore pseudo-casuale con seme fisso: i palazzi sono sempre gli stessi a ogni partita
+  let seed = 610924;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const rr = (a, b) => a + (b - a) * rnd();
+  const ri = (a, b) => Math.floor(rr(a, b + 1));
+  const pick = arr => arr[Math.floor(rnd() * arr.length)];
+
+  const hex2rgb = h => { const v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; };
+  const tono = (h, f) => { const [r, gg, b] = hex2rgb(h); const c = x => Math.max(0, Math.min(255, Math.round(x * f))); return `rgb(${c(r)},${c(gg)},${c(b)})`; };
+  const SOLE = { x: -0.35, y: 0.90 };          // direzione da cui arriva la luce (coordinate canvas)
+
+  // ── Linea di base dei palazzi: subito oltre la fascia dei palchetti (folla) ──
+  const dBase = bandW * (0.5 + 0.86);
+  const B = percorso.map((p, i) => ({ x: p.x + normali[i].x * dBase, y: p.y + normali[i].y * dBase }));
+  const cum = [0];
+  for (let i = 0; i < n; i++) { const a = B[i], b = B[(i + 1) % n]; cum.push(cum[i] + Math.hypot(b.x - a.x, b.y - a.y)); }
+  const Ltot = cum[n];
+
+  // Punto sulla linea di base a lunghezza d'arco u, con normale ESTERNA (verso fuori dalla piazza)
+  function punto(u) {
+    u = ((u % Ltot) + Ltot) % Ltot;
+    let lo = 0, hi = n;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= u) lo = m; else hi = m; }
+    const a = B[lo], b = B[(lo + 1) % n], t = (u - cum[lo]) / ((cum[lo + 1] - cum[lo]) || 1);
+    const na = normali[lo], nb = normali[(lo + 1) % n];
+    let nx = na.x + (nb.x - na.x) * t, ny = na.y + (nb.y - na.y) * t;
+    const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, nx, ny };
+  }
+
+  // Corpo "dritto": corda tra due punti della linea di base, spostata verso fuori quanto basta per non
+  // tagliare la curva (così la base del palazzo non entra mai nella folla).
+  function retta(x, y) {
+    const p = punto(x), q = punto(y), pm = punto((x + y) / 2);
+    const dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1;
+    const tx = dx / L, ty = dy / L;
+    let nx = ty, ny = -tx;
+    if (nx * pm.nx + ny * pm.ny < 0) { nx = -nx; ny = -ny; }
+    let dev = 0;
+    for (let k = 1; k < 8; k++) { const m = punto(x + (y - x) * k / 8); const d = (m.x - p.x) * nx + (m.y - p.y) * ny; if (d > dev) dev = d; }
+    return { ox: p.x + nx * dev, oy: p.y + ny * dev, tx, ty, nx, ny, L, dev };
+  }
+  // Suddivide [a,b] in tratti che la corda approssima con scarto ≤ tol
+  function spezzaDritti(a, b, tol) {
+    const out = [];
+    (function rec(x, y) {
+      const p = punto(x), q = punto(y), dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1;
+      let dev = 0;
+      for (let k = 1; k < 8; k++) { const m = punto(x + (y - x) * k / 8); const d = Math.abs((m.x - p.x) * dy - (m.y - p.y) * dx) / L; if (d > dev) dev = d; }
+      if (dev > tol && (y - x) > W * 0.045) { const mid = (x + y) / 2; rec(x, mid); rec(mid, y); } else out.push(retta(x, y));
+    })(a, b);
+    return out;
+  }
+  // Punto del corpo R a distanza u lungo la facciata e d verso l'esterno
+  const pR = (R, u, d) => ({ x: R.ox + R.tx * u + R.nx * d, y: R.oy + R.ty * u + R.ny * d, nx: R.nx, ny: R.ny });
+  function campiona(R, u0, u1, passo, d) {
+    const m = Math.max(2, Math.ceil((u1 - u0) / passo) + 1), arr = [];
+    for (let k = 0; k < m; k++) arr.push(pR(R, u0 + (u1 - u0) * k / (m - 1), d));
+    return arr;
+  }
+  const sp_ = (p, d) => ({ x: p.x + p.nx * d, y: p.y + p.ny * d, nx: p.nx, ny: p.ny });
+  function striscia(A, Bb) {
+    ctx.beginPath();
+    A.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    for (let i = Bb.length - 1; i >= 0; i--) ctx.lineTo(Bb[i].x, Bb[i].y);
+    ctx.closePath();
+  }
+  function linea(A) { ctx.beginPath(); A.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); }
+  function poligono(pts) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.closePath(); }
+  // Quadrilatero orientato (c = centro, (nx,ny) = "alto", w = larghezza lungo la facciata, h = altezza)
+  function quad(c, w, h) {
+    const tx = -c.ny, ty = c.nx, hw = w / 2, hh = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(c.x - tx * hw - c.nx * hh, c.y - ty * hw - c.ny * hh);
+    ctx.lineTo(c.x + tx * hw - c.nx * hh, c.y + ty * hw - c.ny * hh);
+    ctx.lineTo(c.x + tx * hw + c.nx * hh, c.y + ty * hw + c.ny * hh);
+    ctx.lineTo(c.x - tx * hw + c.nx * hh, c.y - ty * hw + c.ny * hh);
+    ctx.closePath();
+  }
+
+  // ── Tratto lasciato libero in basso (Palazzo Pubblico + Torre del Mangia) ──
+  const uVuoto0 = cum[Math.round(11.3 / 21 * n)], uVuoto1 = cum[Math.round(14.4 / 21 * n)];
+  const uInizio = uVuoto1, La = Ltot - (uVuoto1 - uVuoto0);
+
+  function partizione(lenMin, lenMax, gapMin, gapMax, pGap) {
+    const out = []; let cur = uInizio; const fine = uInizio + La;
+    while (cur < fine - W * 0.02) {
+      let len = W * rr(lenMin, lenMax);
+      if (cur + len > fine - W * lenMin * 0.5) len = fine - cur;
+      const gap = (rnd() < pGap) ? W * rr(gapMin, gapMax) : W * 0.0022;
+      out.push({ a: cur, b: cur + len, gap });
+      cur += len + gap;
+    }
+    return out;
+  }
+
+  // ── Stili di facciata ──
+  const TIPI = {
+    mattone:   { muro: ['#b3694d', '#a85f47', '#bc7558'], fin: '#2b1a14', telaio: null },
+    rosa:      { muro: ['#d3a196', '#c99286', '#dbaea3'], fin: '#3a2622', telaio: '#f1e4d2' },
+    salmone:   { muro: ['#e0a683', '#d99a76', '#e7b391'], fin: '#3a2a24', telaio: '#f6ecda' },
+    ocra:      { muro: ['#d9a94a', '#cf9f42', '#dfb45a'], fin: '#3a2a1a', telaio: '#f3e8c9' },
+    crema:     { muro: ['#e9dcc0', '#e2d2b0', '#efe3cb'], fin: '#3d2c22', telaio: '#ffffff' },
+    sansedoni: { muro: ['#c7703f', '#be6538', '#d07a49'], fin: '#2b1a12', telaio: '#e9cda6', arco: true, merli: true }
+  };
+  const TETTI = ['#b0603a', '#a75736', '#9c5a3a', '#b56a41', '#98684e', '#8b5f49', '#a56c48'];
+  const TENDE = ['#a3262a', '#a3262a', '#7c2140', '#3f5a3c'];
+
+  function scegliTipo(c) {
+    const px = c.x / W;
+    const alto = c.ny < -0.55, sx = c.nx < -0.55, dx = c.nx > 0.55;
+    if (alto && px >= 0.60 && px <= 0.90 && rnd() < 0.8) return 'sansedoni';
+    if (sx) return pick(['mattone', 'mattone', 'mattone', 'mattone', 'rosa', 'salmone']);
+    if (alto) {
+      if (px < 0.36) return pick(['mattone', 'mattone', 'salmone']);
+      if (px < 0.62) return pick(['salmone', 'crema', 'crema', 'ocra']);
+      return pick(['sansedoni', 'ocra', 'crema']);
+    }
+    if (dx) return pick(['crema', 'crema', 'salmone', 'rosa', 'sansedoni', 'ocra', 'mattone']);
+    return pick(['mattone', 'mattone', 'salmone', 'rosa', 'ocra']);
+  }
+
+  // ── Tetto a due falde su un corpo dritto R (da u0 a u1) ──
+  function tetto(R, u0, u1, dIn, fw, rd, colBase, opz) {
+    const Pf = campiona(R, u0, u1, W * 0.0046, dIn);
+    const rp = opz.rp;
+    const dSole = -(R.nx * SOLE.x + R.ny * SOLE.y);         // >0: la falda verso la piazza guarda il sole
+    const colA = tono(colBase, 1.0 + 0.10 * dSole), colB = tono(colBase, 0.93 - 0.10 * dSole);
+    const T = Pf.map(p => sp_(p, fw)), M = Pf.map(p => sp_(p, fw + rd * rp)), F = Pf.map(p => sp_(p, fw + rd));
+    striscia(T, M); ctx.fillStyle = colA; ctx.fill();
+    striscia(M, F); ctx.fillStyle = colB; ctx.fill();
+    if (opz.vel) { striscia(T, F); ctx.fillStyle = `rgba(20,8,2,${opz.vel})`; ctx.fill(); }
+
+    // Coppi: file lungo la falda (ognuna con intensità un po' diversa) e correnti trasversali
+    ctx.lineWidth = 0.8;
+    const lotti = [[], [], [], []];
+    T.forEach((p, k) => { const r = rnd(); lotti[r < 0.30 ? 0 : r < 0.62 ? 1 : r < 0.82 ? 2 : 3].push(k); });
+    const stili = ['rgba(35,14,4,.16)', 'rgba(35,14,4,.30)', 'rgba(28,10,2,.48)', 'rgba(255,205,160,.15)'];
+    lotti.forEach((ks, i) => {
+      ctx.beginPath();
+      ks.forEach(k => { ctx.moveTo(T[k].x, T[k].y); ctx.lineTo(F[k].x, F[k].y); });
+      ctx.strokeStyle = stili[i]; ctx.stroke();
+    });
+    ctx.lineWidth = 0.7; ctx.strokeStyle = 'rgba(30,10,2,.10)';
+    for (let q = 0.09; q < 1; q += 0.09) { if (Math.abs(q - rp) < 0.05) continue; linea([sp_(Pf[0], fw + rd * q), sp_(Pf[Pf.length - 1], fw + rd * q)]); ctx.stroke(); }
+
+    // Macchie di usura / tegole più chiare o scure
+    const nMacchie = Math.max(3, Math.round((u1 - u0) / W * 55));
+    for (let i = 0; i < nMacchie; i++) {
+      const c = sp_(Pf[ri(0, Pf.length - 1)], fw + rd * rr(0.08, 0.92));
+      quad(c, W * rr(0.012, 0.032), rd * rr(0.10, 0.28));
+      ctx.fillStyle = rnd() < 0.5 ? `rgba(255,205,160,${rr(.05, .13)})` : `rgba(30,12,4,${rr(.07, .17)})`;
+      ctx.fill();
+    }
+
+    // Colmo
+    linea([M[0], M[M.length - 1]]); ctx.strokeStyle = 'rgba(20,8,2,.55)'; ctx.lineWidth = 2.2; ctx.stroke();
+    linea([M[0], M[M.length - 1]]); ctx.strokeStyle = tono(colBase, 1.30); ctx.lineWidth = 1.2; ctx.stroke();
+
+    if (opz.dettagli) {
+      // Comignoli (con ombra portata) e lucernari
+      const nCom = Math.round(rr(0, 1.2) * (u1 - u0) / (W * 0.12));
+      for (let i = 0; i < nCom; i++) {
+        const c = sp_(Pf[ri(1, Pf.length - 2)], fw + rd * rr(0.2, 0.85));
+        const s = W * rr(0.0075, 0.0105);
+        ctx.fillStyle = 'rgba(15,6,2,.42)';
+        ctx.fillRect(c.x - s / 2 + s * 0.55, c.y - s / 2 + s * 0.75, s, s);
+        ctx.fillStyle = '#b48a68'; ctx.fillRect(c.x - s / 2, c.y - s / 2, s, s);
+        ctx.fillStyle = '#2a1a12'; ctx.fillRect(c.x - s * 0.28, c.y - s * 0.28, s * 0.56, s * 0.56);
+      }
+      const nLuc = Math.round(rr(0, 1.1) * (u1 - u0) / (W * 0.12));
+      for (let i = 0; i < nLuc; i++) {
+        const c = sp_(Pf[ri(1, Pf.length - 2)], fw + rd * rr(0.15, 0.4));
+        quad(c, W * 0.011, W * 0.008); ctx.fillStyle = '#5a4536'; ctx.fill();
+        quad(c, W * 0.0085, W * 0.0058); ctx.fillStyle = '#b9cbd0'; ctx.fill();
+      }
+    }
+    // Ombra della gronda sulla facciata
+    if (fw > 0) { striscia(T, T.map(p => sp_(p, W * 0.006))); ctx.fillStyle = 'rgba(0,0,0,.30)'; ctx.fill(); }
+    return { T, M, F };
+  }
+
+  // ── Facciata su un corpo dritto R: muro, piani, finestre, cornicione ──
+  function facciata(R, u0, u1, dIn, fw, tipoNome, muro, sp, ww) {
+    const tp = TIPI[tipoNome];
+    const P = [pR(R, u0, dIn), pR(R, u1, dIn)];
+    const nr = Math.max(3, Math.round(fw / (W * 0.0112)));
+    const Top = P.map(p => sp_(p, fw));
+    striscia(P, Top); ctx.fillStyle = muro; ctx.fill();
+    // Luce: le facciate rivolte al sole sono più chiare
+    const dS = -(R.nx * SOLE.x + R.ny * SOLE.y);
+    striscia(P, Top); ctx.fillStyle = dS > 0 ? `rgba(255,232,190,${0.13 * dS})` : `rgba(20,8,2,${-0.16 * dS})`; ctx.fill();
+    // Piano terra più scuro, ultimo piano un filo più chiaro
+    striscia(P, P.map(p => sp_(p, fw / nr))); ctx.fillStyle = 'rgba(30,12,4,.16)'; ctx.fill();
+    striscia(P.map(p => sp_(p, fw * (nr - 1) / nr)), Top); ctx.fillStyle = 'rgba(255,236,200,.07)'; ctx.fill();
+    // Marcapiani
+    ctx.strokeStyle = 'rgba(50,24,8,.22)'; ctx.lineWidth = 0.8;
+    for (let j = 1; j < nr; j++) { linea(P.map(p => sp_(p, fw * j / nr))); ctx.stroke(); }
+
+    // Tende del piano terra (come le tende rosse dei caffè in piazza)
+    if ((tipoNome === 'salmone' || tipoNome === 'crema' || tipoNome === 'ocra') && (u1 - u0) > W * 0.09 && rnd() < 0.5) {
+      const L = u1 - u0, s0 = u0 + L * rr(0.05, 0.25), s1 = s0 + L * rr(0.35, 0.6);
+      const seg = [pR(R, s0, dIn), pR(R, Math.min(s1, u1), dIn)];
+      striscia(seg, seg.map(p => sp_(p, fw / nr * 0.62)));
+      ctx.fillStyle = pick(TENDE); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.8; ctx.stroke();
+    }
+
+    // Finestre
+    const wh = (fw / nr) * 0.54, marg = sp * 0.62;
+    for (let u = u0 + marg; u < u1 - marg * 0.7; u += sp) {
+      const base = pR(R, u, dIn);
+      for (let j = 0; j < nr; j++) {
+        const c = sp_(base, fw * (j + 0.52) / nr);
+        const w = j === 0 ? ww * 1.15 : ww, h = j === 0 ? wh * 0.85 : wh;
+        if (tp.telaio) { quad(c, w * 1.34, h * 1.18); ctx.fillStyle = tp.telaio; ctx.fill(); }
+        const chiusa = rnd() < 0.16;      // persiana chiusa: tono medio invece del nero della finestra aperta
+        ctx.fillStyle = chiusa ? tono(muro, 0.62) : tp.fin;
+        quad(c, w, h); ctx.fill();
+        if (tp.arco && j > 0) {           // finestre ad arco (Palazzo Sansedoni)
+          ctx.beginPath(); ctx.arc(c.x + c.nx * h / 2, c.y + c.ny * h / 2, w / 2, 0, TAU); ctx.fill();
+        }
+      }
+    }
+
+    // Cornicione e merli
+    striscia(P.map(p => sp_(p, fw * 0.93)), Top); ctx.fillStyle = tono(muro, 1.14); ctx.fill();
+    linea(Top); ctx.strokeStyle = 'rgba(40,18,6,.55)'; ctx.lineWidth = 1; ctx.stroke();
+    if (tp.merli) {
+      const ms = W * 0.0062, m = Math.max(2, Math.floor((u1 - u0) / (ms * 2)));
+      ctx.fillStyle = tono(muro, 1.10); ctx.strokeStyle = 'rgba(40,18,6,.5)'; ctx.lineWidth = 0.6;
+      for (let k = 0; k <= m; k++) { const c = sp_(pR(R, u0 + (u1 - u0) * k / m, dIn + fw), ms * 0.5); quad(c, ms, ms); ctx.fill(); ctx.stroke(); }
+    }
+  }
+
+  // Spigolo tra due corpi consecutivi (angolo del palazzo): raccorda facciata e tetto
+  function spigolo(R1, R2, dIn, fw, rd, muro, colTetto, vel) {
+    const p1 = pR(R1, R1.L, dIn), s = pR(R2, 0, dIn);
+    if (Math.hypot(p1.x - s.x, p1.y - s.y) > W * 0.32) return;   // (sicurezza: solo raccordi tra corpi davvero contigui)
+    const a1 = sp_(p1, fw), a2 = sp_(s, fw), b1 = sp_(p1, fw + rd), b2 = sp_(s, fw + rd);
+    if (fw > 0) { poligono([p1, a1, a2, s]); ctx.fillStyle = tono(muro, 0.80); ctx.fill(); ctx.strokeStyle = 'rgba(30,12,4,.35)'; ctx.lineWidth = 0.8; ctx.stroke(); }
+    poligono([a1, b1, b2, a2]); ctx.fillStyle = tono(colTetto, 0.86); ctx.fill();
+    if (vel) { ctx.fillStyle = `rgba(20,8,2,${vel})`; ctx.fill(); }
+    ctx.strokeStyle = 'rgba(28,10,2,.40)'; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(b2.x, b2.y); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b1.x, b1.y); ctx.stroke();
+  }
+
+  // ═════════ Disegno ═════════
+  // Fondo: tetti lontani, in ombra
+  const fondo = ctx.createLinearGradient(0, 0, 0, ch);
+  fondo.addColorStop(0, '#2b160b'); fondo.addColorStop(1, '#1a0c05');
+  ctx.fillStyle = fondo; ctx.fillRect(0, 0, cw, ch);
+  ctx.save();
+  ctx.translate(off.x, off.y);
+  ctx.lineJoin = 'round';
+
+  // Selciato della piazza: dove non c'è folla né palazzo (angoli, tratto riservato in basso) si vede questo
+  poligono(B); ctx.fillStyle = '#4a2c19'; ctx.fill();
+
+  // Pavimentazione grigia nell'angolo tra Torre del Mangia/Cappella e San Martino: resta sotto a
+  // tutto il resto (palazzi, materassi), così copre solo lo scorcio di sfondo altrimenti marrone
+  // rimasto visibile in quella zona, senza toccare nulla di ciò che vi è disegnato sopra.
+  poligono([
+    { x: W * 0.755, y: W * 0.775 }, { x: W * 0.945, y: W * 0.775 },
+    { x: W * 0.945, y: W * 0.900 }, { x: W * 0.755, y: W * 0.900 }
+  ]); ctx.fillStyle = '#3a3a3a'; ctx.fill();
+
+  // ── Suolo attorno al Palazzo Pubblico e a San Martino (coordinate in unità di W) ──
+  (function suolo() {
+    const est = percorso.map((p, i) => ({ x: p.x + normali[i].x * bandW * 0.53, y: p.y + normali[i].y * bandW * 0.53 }));
+    const innerT = percorso.map((p, i) => ({ x: p.x + normali[i].x * bandW * 0.50, y: p.y + normali[i].y * bandW * 0.50 }));
+    const near = (arr, x, y) => { let k = 0, d = Infinity; arr.forEach((p, i) => { const dd = Math.hypot(p.x - x, p.y - y); if (dd < d) { d = dd; k = i; } }); return k; };
+    const yB = Math.max(...B.map(p => p.y));
+    const P0 = { x: W * 0.763, y: W * 0.833 }, P1 = { x: W * 0.944, y: W * 0.860 };
+    const TUFO = '#94592c';
+    const i0 = Math.round(11.3 / 21 * n), i1 = near(est, P0.x, P0.y);
+    const thM = W * 0.016; // spessore dei materassi
+
+    // Bordo esterno dei materassi (segue la curva della pista in curva di San Martino, non più una diagonale)
+    const outerM = []; for (let i = i0; i <= i1; i++) outerM.push({ x: est[i].x + normali[i].x * thM, y: est[i].y + normali[i].y * thM });
+
+    // 1) Selciato grigio scuro tra i materassi e i palazzi (tutto lo spazio dietro i materassi)
+    const j1 = near(B, W * 0.95, W * 0.87), j0 = near(B, P0.x, yB);
+    const grey = [...outerM]; for (let j = j1; j <= j0; j++) grey.push(B[j]);
+    poligono(grey); ctx.fillStyle = '#3a3a3a'; ctx.fill();
+
+    // 2) Sottile striscia di tufo tra il bordo pista e i materassi, lungo la curva
+    const stripT = []; for (let i = i0; i <= i1; i++) stripT.push(innerT[i]);
+    for (let i = i1; i >= i0; i--) stripT.push(est[i]);
+    poligono(stripT); ctx.fillStyle = TUFO; ctx.fill();
+
+    // 3) Tufo davanti al portone
+    ctx.fillStyle = TUFO; ctx.fillRect(W * 0.598, W * 0.80, W * 0.057, yB - W * 0.80);
+
+    // 4) Materassi verde scuro, in prossimità del bordo della curva di San Martino (seguono la curva della pista)
+    let curLen = 0; for (let i = i0; i < i1; i++) curLen += Math.hypot(est[i + 1].x - est[i].x, est[i + 1].y - est[i].y);
+    const lenM = W * 0.030, nM = Math.max(1, Math.round(curLen / lenM));
+    const pts = []; {
+      let seg = i0, acc = 0;
+      for (let k = 0; k <= nM; k++) {
+        const targetD = curLen * k / nM;
+        while (seg < i1 - 1 && acc + Math.hypot(est[seg + 1].x - est[seg].x, est[seg + 1].y - est[seg].y) < targetD) {
+          acc += Math.hypot(est[seg + 1].x - est[seg].x, est[seg + 1].y - est[seg].y); seg++;
+        }
+        const segLen = Math.hypot(est[seg + 1].x - est[seg].x, est[seg + 1].y - est[seg].y) || 1;
+        const t = Math.max(0, Math.min(1, (targetD - acc) / segLen));
+        pts.push({
+          x: est[seg].x + (est[seg + 1].x - est[seg].x) * t,
+          y: est[seg].y + (est[seg + 1].y - est[seg].y) * t,
+          nx: normali[seg].x, ny: normali[seg].y
+        });
+      }
+    }
+    for (let k = 0; k < nM; k++) {
+      const A = pts[k], C = pts[k + 1];
+      let tx = C.x - A.x, ty = C.y - A.y; const Ln2 = Math.hypot(tx, ty) || 1; tx /= Ln2; ty /= Ln2;
+      const nx = A.nx, ny = A.ny;
+      const a = A, b = { x: A.x + tx * (Ln2 - 1.2), y: A.y + ty * (Ln2 - 1.2) };
+      const q = [a, b, { x: b.x + nx * thM, y: b.y + ny * thM }, { x: a.x + nx * thM, y: a.y + ny * thM }];
+      ctx.fillStyle = 'rgba(0,0,0,.30)'; poligono(q.map(p => ({ x: p.x - nx * 1.5, y: p.y - ny * 1.5 }))); ctx.fill();
+      poligono(q); ctx.fillStyle = k % 2 ? '#1f4a2c' : '#275936'; ctx.fill();
+      ctx.strokeStyle = 'rgba(8,28,14,.7)'; ctx.lineWidth = 0.9; ctx.stroke();
+      const m = { x: (a.x + b.x) / 2 + nx * thM * 0.5, y: (a.y + b.y) / 2 + ny * thM * 0.5 };
+      ctx.strokeStyle = 'rgba(170,210,180,.40)'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(m.x - tx * Ln2 * 0.32, m.y - ty * Ln2 * 0.32); ctx.lineTo(m.x + tx * Ln2 * 0.32, m.y + ty * Ln2 * 0.32); ctx.stroke();
+    }
+  })();
+
+  const TOL = W * 0.0075;
+
+  // File posteriori: solo tetti (la più lontana è la più scura)
+  [{ dIn: W * 0.200, rd: W * 0.165, vel: 0.28, lenMin: 0.10, lenMax: 0.22 },
+   { dIn: W * 0.098, rd: W * 0.118, vel: 0.14, lenMin: 0.10, lenMax: 0.22 }].forEach(fila => {
+    partizione(fila.lenMin, fila.lenMax, 0.004, 0.008, 0.1).forEach(bl => {
+      const dIn = fila.dIn + W * rr(-0.022, 0.022), rd = fila.rd * rr(0.85, 1.2), col = pick(TETTI), vel = fila.vel * rr(0.8, 1.2);
+      const rp = rr(0.42, 0.56), corpi = spezzaDritti(bl.a, bl.b, TOL), det = rnd() < 0.5;
+      corpi.forEach((R, i) => {
+        tetto(R, 0, R.L, dIn, 0, rd, col, { vel, dettagli: det, rp });
+        if (i) spigolo(corpi[i - 1], R, dIn, 0, rd, col, col, vel);
+      });
+    });
+  });
+
+  // Prima fila: facciate + tetti
+  const blocchi = partizione(0.12, 0.25, 0.007, 0.011, 0.5).map(bl => {
+    const c = punto((bl.a + bl.b) / 2);
+    const tipo = scegliTipo(c);
+    const fw = W * (tipo === 'sansedoni' ? rr(0.050, 0.060) : rr(0.040, 0.056));
+    return Object.assign(bl, {
+      tipo, fw, rd: W * rr(0.056, 0.076), tetto: pick(TETTI), muro: pick(TIPI[tipo].muro), rp: rr(0.42, 0.56),
+      sp: W * rr(0.0185, 0.0235), ww: W * rr(0.0072, 0.0090), corpi: spezzaDritti(bl.a, bl.b, TOL)
+    });
+  });
+
+  // Vicoli tra un palazzo e l'altro (strade che sboccano in piazza)
+  blocchi.forEach(bl => {
+    if (bl.gap < W * 0.006) return;
+    const R = retta(bl.b - W * 0.002, bl.b + bl.gap + W * 0.002);
+    const P = [pR(R, 0, -W * 0.004), pR(R, R.L, -W * 0.004)], Fz = P.map(p => sp_(p, W * 0.125));
+    striscia(P, Fz); ctx.fillStyle = '#26130a'; ctx.fill();
+  });
+
+  blocchi.forEach((bl, bi) => {
+    bl.corpi.forEach((R, i) => {
+      facciata(R, 0, R.L, 0, bl.fw, bl.tipo, bl.muro, bl.sp, bl.ww);
+      tetto(R, 0, R.L, 0, bl.fw, bl.rd, bl.tetto, { dettagli: true, rp: bl.rp });
+      if (i) spigolo(bl.corpi[i - 1], R, 0, bl.fw, bl.rd, bl.muro, bl.tetto, 0);
+    });
+    // Angolo tra due palazzi contigui (senza vicolo)
+    const next = blocchi[bi + 1];
+    if (next && bl.gap < W * 0.006) spigolo(bl.corpi[bl.corpi.length - 1], next.corpi[0], 0, bl.fw, bl.rd, bl.muro, bl.tetto, 0);
+  });
+
+  // Torre merlata (in alto a destra, sul Palazzo Sansedoni, come nella foto aerea)
+  (function torre() {
+    let best = null, bd = Infinity;
+    blocchi.forEach(bl => bl.corpi.forEach(R => {
+      if (R.ny > -0.7) return;
+      const cx = (R.ox + R.tx * R.L / 2) / W, d = Math.abs(cx - 0.68);
+      if (d < bd) { bd = d; best = { bl, R }; }
+    }));
+    if (!best) return;
+    const { bl, R } = best;
+    const c0 = pR(R, R.L / 2, bl.fw + bl.rd * 0.30);
+    const s = W * 0.026, alz = W * 0.052;
+    const nx = R.nx, ny = R.ny, tx = -ny, ty = nx;
+    const ang = (cx, cy, r, sgnT, sgnN) => ({ x: cx + tx * r * sgnT + nx * r * sgnN, y: cy + ty * r * sgnT + ny * r * sgnN });
+    const hb = s / 2, ht = s * 0.58;
+    const base = [ang(c0.x, c0.y, hb, -1, -1), ang(c0.x, c0.y, hb, 1, -1), ang(c0.x, c0.y, hb, 1, 1), ang(c0.x, c0.y, hb, -1, 1)];
+    const cT = { x: c0.x + nx * alz, y: c0.y + ny * alz };
+    const top = [ang(cT.x, cT.y, ht, -1, -1), ang(cT.x, cT.y, ht, 1, -1), ang(cT.x, cT.y, ht, 1, 1), ang(cT.x, cT.y, ht, -1, 1)];
+    // ombra a terra
+    ctx.fillStyle = 'rgba(10,4,1,.40)';
+    poligono(base.map(p => ({ x: p.x - W * 0.008, y: p.y + W * 0.010 }))); ctx.fill();
+    const facce = [[3, 0, '#a85a30'], [1, 2, '#a85a30'], [0, 1, '#d07a49']];   // laterali, poi lato verso la piazza
+    facce.forEach(([i, j, col]) => {
+      poligono([base[i], base[j], top[j], top[i]]);
+      ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(40,16,6,.55)'; ctx.lineWidth = 0.8; ctx.stroke();
+    });
+    // feritoie sul lato verso la piazza
+    for (let k = 0; k < 3; k++) {
+      const q = (k + 0.7) / 3.4, p0 = { x: base[0].x + (top[0].x - base[0].x) * q, y: base[0].y + (top[0].y - base[0].y) * q };
+      const p1 = { x: base[1].x + (top[1].x - base[1].x) * q, y: base[1].y + (top[1].y - base[1].y) * q };
+      ctx.beginPath(); ctx.arc((p0.x + p1.x) / 2, (p0.y + p1.y) / 2, s * 0.07, 0, TAU); ctx.fillStyle = '#2b1a12'; ctx.fill();
+    }
+    // sommità con merli
+    poligono(top); ctx.fillStyle = '#c9743f'; ctx.fill(); ctx.strokeStyle = 'rgba(40,16,6,.7)'; ctx.lineWidth = 1; ctx.stroke();
+    poligono([ang(cT.x, cT.y, ht * 0.62, -1, -1), ang(cT.x, cT.y, ht * 0.62, 1, -1), ang(cT.x, cT.y, ht * 0.62, 1, 1), ang(cT.x, cT.y, ht * 0.62, -1, 1)]);
+    ctx.fillStyle = '#5a3a2a'; ctx.fill();
+    const ms = W * 0.0052;
+    ctx.fillStyle = '#d98a52'; ctx.strokeStyle = 'rgba(40,16,6,.6)'; ctx.lineWidth = 0.6;
+    for (let k = 0; k < 4; k++) {
+      const p = top[k], q = top[(k + 1) % 4];
+      for (let t = 0.12; t < 1; t += 0.38) {
+        const mx = p.x + (q.x - p.x) * t, my = p.y + (q.y - p.y) * t;
+        ctx.fillRect(mx - ms / 2, my - ms / 2, ms, ms); ctx.strokeRect(mx - ms / 2, my - ms / 2, ms, ms);
+      }
+    }
+  })();
+
+  // ═════════ PALAZZO PUBBLICO + TORRE DEL MANGIA ═════════
+  // Piano terra in marmo bianco, piani alti in laterizio. Tre corpi: ala destra (lato torre) e ala sinistra più basse,
+  // corpo centrale più alto con tetto più alto. Portone d'ingresso, Cappella di Piazza in marmo che copre la base della torre.
+  (function palazzoPubblico() {
+    const uR = uVuoto0 + (uVuoto1 - uVuoto0) * 0.34, uL = blocchi[0].b;
+    const CREMA = '#eadcbc', MUR = '#b5573a', MARMO = '#e6dfcc';
+
+    // Ala a destra della torre (fino all'angolo di San Martino)
+    spezzaDritti(uVuoto0 - W * 0.004, uR, TOL).forEach((Rw, i, arr) => {
+      const fwA = W * 0.05, rdA = W * 0.15;
+      facciata(Rw, 0, Rw.L, 0, fwA, 'mattone', '#a8583f', W * 0.0215, W * 0.0082);
+      tetto(Rw, 0, Rw.L, 0, fwA, rdA, '#a0563a', { dettagli: true, rp: 0.5 });
+      if (i) spigolo(arr[i - 1], Rw, 0, fwA, rdA, '#a8583f', '#a0563a', 0);
+    });
+
+    const R = retta(uR, uL), L = R.L;
+    const toU = x => (x * W - R.ox) * R.tx + (R.oy - R.oy) * R.ty;      // x (in W) → ascissa lungo la facciata
+    const fwW = W * 0.082, fwC = W * 0.112;
+    const uA = L * 0.30, uB = L * 0.68;                                  // confini dei tre corpi
+    const arco = (c, w, h) => { ctx.beginPath(); ctx.arc(c.x + c.nx * h / 2, c.y + c.ny * h / 2, w / 2, 0, TAU); ctx.fill(); };
+    const uPorta = toU(0.628), sp = W * 0.0295;
+
+    function corpo(u0, u1, fw, g, nUp, opts) {
+      opts = opts || {};
+      const P = [pR(R, u0, 0), pR(R, u1, 0)], Top = P.map(p => sp_(p, fw));
+      striscia(P, Top); ctx.fillStyle = MUR; ctx.fill();
+      striscia(P, Top); ctx.fillStyle = 'rgba(20,8,2,.14)'; ctx.fill();
+      // piano terra in marmo bianco
+      striscia(P, P.map(p => sp_(p, fw * g))); ctx.fillStyle = MARMO; ctx.fill();
+      striscia(P, P.map(p => sp_(p, fw * g))); ctx.fillStyle = 'rgba(40,30,15,.10)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(110,98,78,.30)'; ctx.lineWidth = 0.7;
+      [0.33, 0.66].forEach(q => { linea([pR(R, u0, fw * g * q), pR(R, u1, fw * g * q)]); ctx.stroke(); });
+      // marcapiani
+      const yb = [g]; const hh = (1 - g - 0.13) / nUp;
+      for (let k = 1; k <= nUp; k++) yb.push(g + hh * k);
+      ctx.strokeStyle = 'rgba(234,220,188,.55)'; ctx.lineWidth = 1.2;
+      yb.forEach(q => { linea([pR(R, u0, fw * q), pR(R, u1, fw * q)]); ctx.stroke(); });
+      // finestre — numero fisso di colonne per riga: 3 nelle ali basse laterali (nella
+      // parte con il portone, il portone stesso occupa una delle 3), 4 nella parte centrale.
+      const nCols = opts.nCols || 3;
+      let passo = 0, cols = [];
+      if (opts.colsU) {
+        // posizioni esplicite (usato per l'ala col portone, per tenere le finestre
+        // lontane dall'ingombro della Torre del Mangia che sorge accanto a u=0)
+        cols = opts.colsU.map(u => ({ u, porta: false }));
+        if (opts.portaU != null) cols.push({ u: opts.portaU, porta: true });
+        cols.sort((a, b) => a.u - b.u);
+      } else {
+        const margine = Math.max(sp * 0.6, W * 0.02);
+        passo = (u1 - u0 - margine * 2) / Math.max(1, nCols - 1);
+        for (let i = 0; i < nCols; i++) cols.push({ u: u0 + margine + passo * i, porta: false });
+        if (opts.portaU != null) {
+          // aggancia la colonna più vicina esattamente sul portone: lì, al piano terra, si
+          // vede il portone (disegnato a parte) al posto della finestra ad arco.
+          let best = 0, bd = Infinity;
+          cols.forEach((c, i) => { const d = Math.abs(c.u - opts.portaU); if (d < bd) { bd = d; best = i; } });
+          cols[best] = { u: opts.portaU, porta: true };
+        }
+      }
+      const uMidCerchio = (u0 + u1) / 2, rCerchio = fw * hh * 0.44;
+      // soglia di esclusione attorno al cerchio: abbastanza larga da liberare anche le
+      // colonne "vicine" (non solo quelle che si sovrappongono fisicamente allo stemma)
+      const rEsclCerchio = Math.max(rCerchio + W * 0.006, passo * 0.85);
+      cols.forEach(({ u, porta }) => {
+        if (!porta) {
+          const c = sp_(pR(R, u, 0), fw * g * 0.5);
+          ctx.fillStyle = '#f4efe2'; quad(c, W * 0.0150, fw * g * 0.66); ctx.fill(); arco(c, W * 0.0150, fw * g * 0.66);
+          ctx.fillStyle = '#2f2620'; quad(c, W * 0.0105, fw * g * 0.62); ctx.fill(); arco(c, W * 0.0105, fw * g * 0.62);
+        }
+        for (let k = 0; k < nUp; k++) {
+          // Ultimo piano del corpo centrale: solo le colonne che si sovrappongono davvero
+          // allo stemma centrale lasciano il posto al cerchio; le altre hanno la finestra.
+          if (opts.cerchioAlto && k === nUp - 1 && Math.abs(u - uMidCerchio) < rEsclCerchio) continue;
+          const c = sp_(pR(R, u, 0), fw * (yb[k] + yb[k + 1]) / 2);
+          ctx.fillStyle = CREMA; quad(c, W * 0.0170, fw * hh * 0.78); ctx.fill();
+          ctx.fillStyle = '#2b1a14';
+          [-1, 1].forEach(sg => {
+            const c2 = { x: c.x + R.tx * sg * W * 0.0043, y: c.y + R.ty * sg * W * 0.0043, nx: R.nx, ny: R.ny };
+            quad(c2, W * 0.0046, fw * hh * 0.64); ctx.fill(); arco(c2, W * 0.0046, fw * hh * 0.64);
+          });
+        }
+      });
+      // Cerchio (stemma) al centro dell'ultimo piano, al posto delle finestre centrali
+      if (opts.cerchioAlto) {
+        const uMid = uMidCerchio;
+        const cc = sp_(pR(R, uMid, 0), fw * (yb[nUp - 1] + yb[nUp]) / 2);
+        const rC = rCerchio;
+        ctx.beginPath(); ctx.arc(cc.x, cc.y, rC, 0, TAU); ctx.fillStyle = CREMA; ctx.fill();
+        ctx.strokeStyle = '#c8991e'; ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(cc.x, cc.y, rC * 0.46, 0, TAU); ctx.fillStyle = '#7a3a22'; ctx.fill();
+      }
+      // merli
+      const ms = W * 0.0075;
+      ctx.fillStyle = tono(MUR, 1.12); ctx.strokeStyle = 'rgba(40,18,6,.55)'; ctx.lineWidth = 0.6;
+      for (let u = u0 + ms; u < u1 - ms; u += ms * 2) { const c = sp_(pR(R, u, 0), fw * 0.94); quad(c, ms, fw * 0.12); ctx.fill(); ctx.stroke(); }
+      linea(Top); ctx.strokeStyle = 'rgba(40,18,6,.6)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+
+    // Ali basse (destra: lato torre, sinistra) → tetti bassi — 3 finestre per riga
+    // (nell'ala col portone, il portone stesso conta come una delle 3)
+    corpo(0, uA, fwW, 0.34, 2, { portaU: uPorta, colsU: [uA * 0.58, uA * 0.745] }); tetto(R, 0, uA, 0, fwW, W * 0.14, '#a9573b', { dettagli: true, rp: 0.5 });
+    corpo(uB, L, fwW, 0.34, 2, { nCols: 3 }); tetto(R, uB, L, 0, fwW, W * 0.14, '#a9573b', { dettagli: true, rp: 0.5 });
+    // Corpo centrale più alto: tetto più alto, con pareti laterali che spuntano sopra i tetti delle ali
+    [uA, uB].forEach(uu => { const a = pR(R, uu, fwW), b = pR(R, uu, fwC); striscia([a, sp_(a, 0)], [b, sp_(b, 0)]); });
+    // Corpo centrale: 4 finestre per riga, tranne la riga più alta dove c'è il cerchio (stemma)
+    corpo(uA, uB, fwC, 0.26, 3, { cerchioAlto: true, nCols: 4 }); tetto(R, uA, uB, 0, fwC, W * 0.13, '#9c4b32', { dettagli: true, rp: 0.5 });
+    [uA, uB].forEach(uu => { const a = pR(R, uu, fwW), b = pR(R, uu, fwC); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.strokeStyle = 'rgba(20,8,2,.55)'; ctx.lineWidth = 2; ctx.stroke(); });
+
+    // Portone d'ingresso (rimpicciolito: resta entro l'altezza del piano terra in marmo,
+    // cosicché sopra di esso restino due piani interi di finestre — vedi finestreSopraPortone)
+    const pw = W * 0.020, ph = fwW * 0.34 * 0.86;
+    (function portone() {
+      const base = pR(R, uPorta, 0);
+      let c = sp_(base, ph / 2);
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; quad(sp_(base, ph / 2 - W * 0.002), pw + W * 0.004, ph); ctx.fill();
+      ctx.fillStyle = '#f1ecdd'; quad(c, pw, ph); ctx.fill(); arco(c, pw, ph);                 // cornice di marmo
+      ctx.strokeStyle = 'rgba(90,78,60,.55)'; ctx.lineWidth = 0.8; quad(c, pw, ph); ctx.stroke();
+      const iw = pw * 0.70, ih = ph * 0.86; c = sp_(base, ih / 2);
+      ctx.fillStyle = '#251710'; quad(c, iw, ih); ctx.fill(); arco(c, iw, ih);                  // vano
+      ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 1;                                            // battenti in legno
+      [-1, 1].forEach(sg => { const a = { x: c.x + R.tx * sg * iw * 0.25, y: c.y + R.ty * sg * iw * 0.25, nx: R.nx, ny: R.ny }; ctx.fillStyle = '#4a3020'; quad(a, iw * 0.42, ih * 0.80); ctx.fill(); ctx.stroke(); });
+      ctx.fillStyle = 'rgba(255,240,200,.20)'; ctx.beginPath(); ctx.arc(c.x + c.nx * ih * 0.44, c.y + c.ny * ih * 0.44, iw * 0.22, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#d9d3c2'; quad(sp_(base, -W * 0.004), pw * 1.15, W * 0.0075); ctx.fill();   // gradini
+      ctx.strokeStyle = 'rgba(90,78,60,.5)'; ctx.stroke();
+    })();
+
+    // ── Torre del Mangia ──
+    const uT = W * 0.024;
+    const c0 = pR(R, uT + W * 0.006, 0), A1 = W * 0.132, A2 = W * 0.036;
+    const en = (c, d) => ({ x: c.x + R.nx * d, y: c.y + R.ny * d });
+    const sq = (c, r) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({ x: c.x + R.tx * r * a + R.nx * r * b, y: c.y + R.ty * r * a + R.ny * r * b }));
+    const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+    function scatola(cA, rA, cB, rB, cols) {
+      const a = sq(cA, rA), b = sq(cB, rB);
+      [[3, 0, cols[0]], [1, 2, cols[1]], [0, 1, cols[2]]].forEach(([i, j, col]) => {
+        poligono([a[i], a[j], b[j], b[i]]); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(40,16,6,.55)'; ctx.lineWidth = 0.8; ctx.stroke();
+      });
+      return { a, b, fp: (q, s) => lerp(lerp(a[0], a[1], s), lerp(b[0], b[1], s), q) };
+    }
+    const rB = W * 0.021;
+    ctx.fillStyle = 'rgba(10,4,1,.30)'; poligono(sq(c0, rB).map(p => ({ x: p.x - W * 0.008, y: p.y + W * 0.010 }))); ctx.fill();
+    const cS = en(c0, A1);
+    const fu = scatola(c0, rB, cS, rB * 1.12, ['#93472a', '#9d4c2e', '#b9583a']);
+    ctx.fillStyle = '#2b1a12';
+    [0.20, 0.80].forEach(q => { const p = fu.fp(q, 0.5); quad({ x: p.x, y: p.y, nx: R.nx, ny: R.ny }, W * 0.0026, W * 0.008); ctx.fill(); });
+    const ck = fu.fp(0.50, 0.5);
+    ctx.beginPath(); ctx.arc(ck.x, ck.y, W * 0.0078, 0, TAU); ctx.fillStyle = '#f3ead6'; ctx.fill();
+    ctx.strokeStyle = '#3a2416'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ck.x, ck.y); ctx.lineTo(ck.x + W * 0.004, ck.y - W * 0.002); ctx.moveTo(ck.x, ck.y); ctx.lineTo(ck.x - W * 0.001, ck.y + W * 0.0055); ctx.stroke();
+    const cC = en(cS, W * 0.006);
+    scatola(cS, rB * 1.12, cC, rB * 1.26, ['#cdbf9f', '#cdbf9f', '#e6dabf']);
+    const cB = en(cC, A2);
+    const bf = scatola(cC, rB * 1.15, cB, rB * 1.28, ['#cdbf9f', '#d6c9aa', '#efe5cf']);
+    ctx.fillStyle = '#3a2618';
+    [0.2, 0.5, 0.8].forEach(s => {
+      const p0 = bf.fp(0.22, s), p1 = bf.fp(0.78, s);
+      quad({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2, nx: R.nx, ny: R.ny }, W * 0.0062, Math.hypot(p1.x - p0.x, p1.y - p0.y)); ctx.fill();
+    });
+    const tp = sq(cB, rB * 1.36);
+    poligono(tp); ctx.fillStyle = '#f4ecd9'; ctx.fill(); ctx.strokeStyle = 'rgba(40,16,6,.7)'; ctx.lineWidth = 1; ctx.stroke();
+    poligono(sq(cB, rB * 0.80)); ctx.fillStyle = '#4a3323'; ctx.fill();
+    ctx.fillStyle = '#f4ecd9'; ctx.strokeStyle = 'rgba(40,16,6,.6)'; ctx.lineWidth = 0.6;
+    const mm = W * 0.0048;
+    for (let k = 0; k < 4; k++) for (let t = 0.14; t < 1; t += 0.36) {
+      const m = lerp(tp[k], tp[(k + 1) % 4], t); ctx.fillRect(m.x - mm / 2, m.y - mm / 2, mm, mm); ctx.strokeRect(m.x - mm / 2, m.y - mm / 2, mm, mm);
+    }
+    ctx.beginPath(); ctx.arc(cB.x, cB.y, W * 0.0048, 0, TAU); ctx.fillStyle = '#b8860b'; ctx.fill(); ctx.strokeStyle = '#5a3a08'; ctx.lineWidth = 0.7; ctx.stroke();
+
+    // ── Cappella di Piazza: marmo grigio/bianco, vista dall'alto copre la base della torre ──
+    (function cappella() {
+      // Bordo della base della torre (fusto) sul lato vicino ai cuscini/San Martino (u minore):
+      // il lato della cappella rivolto ai cuscini combacia esattamente con questo bordo,
+      // così la cappella, ingrandita, copre per intero la base della torre.
+      const uTorreCentro = uT + W * 0.006, uTorreVicinoCuscini = uTorreCentro - rB;
+      const uE0 = toU(0.662);
+      const uS = uTorreVicinoCuscini, uE = uE0;                // ingrandita: parte dal bordo della torre
+      const dF = -(uE - uS);                                  // base quadrata: profondità = larghezza
+      const pt = (u, d) => pR(R, u, d);
+      const uAt = t => uS + (uE - uS) * t;
+      const band = (d0, d1, col) => { poligono([pt(uS, d0), pt(uE, d0), pt(uE, d1), pt(uS, d1)]); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(60,58,54,.55)'; ctx.lineWidth = 0.8; ctx.stroke(); };
+      ctx.fillStyle = 'rgba(0,0,0,.30)'; poligono([pt(uS, dF), pt(uE, dF), pt(uE, dF), pt(uS, dF)]);
+      band(dF - W * 0.003, W * 0.002, 'rgba(0,0,0,.28)');
+      band(dF, -W * 0.054, '#ded9cd');                       // parete di fondo, dietro la grande apertura
+      // Grande apertura verso la pista, con solo due colonne laterali
+      const colFrac = 0.16;
+      ctx.fillStyle = '#241b12';
+      poligono([pt(uAt(colFrac), dF), pt(uAt(1 - colFrac), dF), pt(uAt(1 - colFrac), -W * 0.054), pt(uAt(colFrac), -W * 0.054)]); ctx.fill();
+      ctx.fillStyle = '#f2ede0';
+      [[0, colFrac], [1 - colFrac, 1]].forEach(([t0, t1]) => {
+        poligono([pt(uAt(t0), dF), pt(uAt(t1), dF), pt(uAt(t1), -W * 0.054), pt(uAt(t0), -W * 0.054)]); ctx.fill();
+        ctx.strokeStyle = 'rgba(60,58,54,.45)'; ctx.lineWidth = 0.7; ctx.stroke();
+      });
+      ctx.strokeStyle = 'rgba(120,112,98,.6)'; ctx.lineWidth = 0.8;
+      [0, colFrac, 1 - colFrac, 1].forEach(t => { linea([pt(uAt(t), dF), pt(uAt(t), -W * 0.054)]); ctx.stroke(); });
+      // Tetto a padiglione (a X): quattro falde triangolari che convergono al centro,
+      // così da vista dall'alto il tetto disegna una X (come indicato in fucsia).
+      const cA = pt(uS, -W * 0.054), cB = pt(uE, -W * 0.054), cC = pt(uE, 0), cD = pt(uS, 0);
+      const centro = { x: (cA.x + cB.x + cC.x + cD.x) / 4, y: (cA.y + cB.y + cC.y + cD.y) / 4 };
+      const falda = (p, q, col) => { poligono([p, q, centro]); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(60,58,54,.55)'; ctx.lineWidth = 0.8; ctx.stroke(); };
+      falda(cA, cB, '#d7d9d8');   // falda lontana (verso il fondo, più chiara)
+      falda(cB, cC, '#b9bcbb');   // falda laterale
+      falda(cC, cD, '#9a9d9c');   // falda vicina alla piazza, in ombra
+      falda(cD, cA, '#c3c6c5');   // falda laterale opposta
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.3;
+      [[cA, centro], [cB, centro], [cC, centro], [cD, centro]].forEach(([p, q]) => { linea([p, q]); ctx.stroke(); });
+    })();
+  })();
+
+  ctx.restore();
+}
+
+function disegnaPistaVuota(ctx, percorso, W, H) {
+  const st = window._palioAnimState;
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;                 // canvas intero (pista + palazzi attorno)
+  const off = (st && st.off) || { x: 0, y: 0 };                        // posizione della pista dentro al canvas
+  const chiave = Math.round(W) + 'x' + Math.round(H) + '@' + cw + 'x' + ch;
+  const ridotto = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let L = st && st.livelli && st.livelli.chiave === chiave ? st.livelli : null;
+  const now = performance.now();
+  if (!L) {
+    const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+    const base = mk(), folla = mk(), dati = {};
+    disegnaPistaBase(base.getContext('2d'), percorso, W, H, dati);
+    // Palazzi attorno alla piazza: livello statico a parte, grande quanto tutto il canvas
+    const edifici = document.createElement('canvas'); edifici.width = cw; edifici.height = ch;
+    disegnaPalazzi(edifici.getContext('2d'), { percorso, normali: dati.normali, bandW: dati.bandW, W, H, cw, ch, off });
+    const F = costruisciFollaPiazza(dati.interni, dati.fonte, dati.flag, W, st && st.contrade ? st.contrade : null, dati.esterni, H);
+    L = { chiave, base, edifici, folla, fctx: folla.getContext('2d'), F, tile: F.tile.map(def => ({ def, ultimo: now })) };
+    L.tile.forEach(T => aggiornaQuadranteFolla(L, T, W, ridotto ? 0 : now / 1000));   // primo riempimento
+    if (st) st.livelli = L;
+  } else if (!ridotto) {
+    let piuVecchia = null;
+    L.tile.forEach(T => { if (now - T.ultimo >= 66 && (!piuVecchia || T.ultimo < piuVecchia.ultimo)) piuVecchia = T; });
+    if (piuVecchia) { piuVecchia.ultimo = now; aggiornaQuadranteFolla(L, piuVecchia, W, now / 1000); }
+  }
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.drawImage(L.edifici, 0, 0);
+  ctx.drawImage(L.base, off.x, off.y);
+  ctx.drawImage(L.folla, off.x, off.y);
+}
+
+// ─── Normali smussate del percorso (media tra il segmento entrante e uscente), con auto-correzione
+//     del verso in base al senso di percorrenza. Estratta a parte perché serve sia al disegno statico
+//     della pista sia al ridisegno del bandierino in primo piano sopra i cavalli. ───
+function calcolaNormaliPista(percorso) {
+  const n = percorso.length;
   const normali = [];
   for (let i = 0; i < n; i++) {
     const prev = percorso[(i-1+n)%n];
@@ -3553,13 +4560,6 @@ function disegnaPistaVuota(ctx, percorso, W, H) {
     const aMed = a1 + da/2 + Math.PI/2;
     normali.push({ x: Math.cos(aMed), y: Math.sin(aMed) });
   }
-
-  // ─── Auto-correzione del verso delle normali ───
-  // In base al senso di percorrenza (orario/antiorario) la normale calcolata
-  // con +90° può puntare verso il centro invece che verso l'esterno: qui lo
-  // verifichiamo con l'area con segno (shoelace) e invertiamo se necessario,
-  // così "esterni" è SEMPRE il bordo davvero più esterno (niente più scambi
-  // che causavano sovrapposizioni/spaccature tra fascia e prato interno).
   let areaSegno = 0;
   for (let i = 0; i < n; i++) {
     const a = percorso[i], b = percorso[(i+1)%n];
@@ -3569,6 +4569,92 @@ function disegnaPistaVuota(ctx, percorso, W, H) {
     // poligono orario in coordinate canvas: la normale +90° punta verso il centro -> invertiamo
     for (let i = 0; i < n; i++) { normali[i].x *= -1; normali[i].y *= -1; }
   }
+  return normali;
+}
+
+// ─── Bandierino di Mossa/Arrivo (forma reale, da foto) ───
+// Asta sottile con pomello scuro in cima; drappo rettangolare all'inasta,
+// diviso in due metà — bianca sopra, nera sotto (balzana di Siena) — ciascuna
+// con bordi ondulati che terminano in una punta ricurva verso il lato libero,
+// separate da un'incisione a coda di rondine. Il drappo sventola verso il
+// centro della piazza.
+// Estratta a parte così può essere ridisegnata in primo piano, sopra ai cavalli:
+// nella realtà i cavalli passano DIETRO al bandierino (che sta sul bordo interno
+// della pista, verso il centro della piazza).
+function disegnaBandierinoPalio(ctx, percorso, normali, bandW) {
+  const p0 = percorso[0];
+  const nr = normali[0];
+  // Base dell'asta sul bordo interno della pista
+  const bx = p0.x - nr.x * bandW * 0.50;
+  const by = p0.y - nr.y * bandW * 0.50;
+  const astaH = Math.max(14, bandW * 0.60);
+  const tx = bx, ty = by - astaH;                    // cima dell'asta
+  const dir = (-nr.x) >= 0 ? 1 : -1;                 // verso il centro della piazza
+
+  // Dimensioni drappo (proporzioni della foto: larghezza ≈ 1.15 × altezza)
+  const dH = Math.max(6.5, bandW * 0.25);
+  const dW = dH * 1.20;
+  const hh = dH / 2;
+  const fy0 = ty + Math.max(2, astaH * 0.08);        // il drappo parte poco sotto il pomello
+
+  // Ombra a terra dell'asta
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(bx, by, Math.max(1.8, bandW*0.06), Math.max(0.9, bandW*0.028), 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fill();
+  ctx.restore();
+
+  // Asta (chiara con filo scuro per staccarla dallo sfondo)
+  const astaW = Math.max(1.2, bandW * 0.05);
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty);
+  ctx.strokeStyle = 'rgba(20,12,6,.85)'; ctx.lineWidth = astaW + 1.2; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty);
+  ctx.strokeStyle = '#D9D2BF'; ctx.lineWidth = astaW; ctx.stroke();
+  ctx.restore();
+
+  // Pomello scuro in cima
+  ctx.beginPath();
+  ctx.arc(tx, ty, Math.max(1.3, astaW * 0.95), 0, Math.PI*2);
+  ctx.fillStyle = '#1B1B1B'; ctx.fill();
+  ctx.strokeStyle = 'rgba(217,210,191,.8)'; ctx.lineWidth = 0.6; ctx.stroke();
+
+  // Drappo (coordinate locali: origine = attacco all'asta, +x = verso il lato libero)
+  ctx.save();
+  ctx.translate(tx, fy0);
+  ctx.scale(dir, 1);
+  const w = dW;
+
+  // Le due metà hanno la STESSA forma (quella bianca); la nera è la stessa sagoma spostata in basso
+  function meta(yOff, fill, stroke) {
+    ctx.beginPath();
+    ctx.moveTo(0, yOff);
+    ctx.bezierCurveTo(0.25*w, yOff - 0.06*hh, 0.50*w, yOff + 0.02*hh, 0.68*w, yOff + 0.18*hh);
+    ctx.bezierCurveTo(0.82*w, yOff + 0.32*hh, 0.95*w, yOff + 0.55*hh, w, yOff + 0.90*hh);
+    ctx.bezierCurveTo(0.88*w, yOff + 0.72*hh, 0.68*w, yOff + 0.80*hh, 0.50*w, yOff + 0.93*hh);
+    ctx.bezierCurveTo(0.35*w, yOff + 1.03*hh, 0.15*w, yOff + 1.00*hh, 0, yOff + hh);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 0.6; ctx.lineJoin = 'round'; ctx.stroke();
+  }
+  meta(0,  '#F1EBDC', 'rgba(0,0,0,.55)');        // metà alta — bianca
+  meta(hh, '#131313', 'rgba(240,230,210,.45)');  // metà bassa — nera
+
+  ctx.restore();
+}
+
+function disegnaPistaBase(ctx, percorso, W, H, dati) {
+  ctx.clearRect(0,0,W,H);
+
+  // Sfondo: lasciato trasparente — lo disegna il livello dei palazzi (disegnaPalazzi), che sta sotto la pista.
+
+  const bandW = Math.max(14, W * 0.085); // larghezza pista proporzionale al canvas
+  const n = percorso.length;
+
+  const normali = calcolaNormaliPista(percorso);
 
   // ─── Punti del bordo esterno e interno (un solo poligono continuo, niente giunture) ───
   const esterni = percorso.map((pt,i) => ({ x: pt.x + normali[i].x*bandW/2, y: pt.y + normali[i].y*bandW/2 }));
@@ -3662,65 +4748,88 @@ function disegnaPistaVuota(ctx, percorso, W, H) {
   traccia(interni, true);
   ctx.strokeStyle='rgba(220,175,70,.55)'; ctx.lineWidth=1.2; ctx.lineJoin='round'; ctx.stroke();
 
-  // ─── Sbandierino di Mossa/Arrivo — su percorso[0], bordo interno, drappo verso il centro ───
-  const p0Flag = percorso[0];
-  const nrmFlag = normali[0];
-  // Il bordo interno è nella direzione -nrmFlag (verso il centro del campo)
-  // Piazziamo la base dell'asta esattamente sul bordo interno
-  const astaBaseX = p0Flag.x - nrmFlag.x * bandW * 0.50;
-  const astaBaseY = p0Flag.y - nrmFlag.y * bandW * 0.50;
-  const astaH = Math.max(18, bandW * 1.0);
-  const astaW = Math.max(1.5, bandW * 0.07);
-  const astaTopX = astaBaseX;
-  const astaTopY = astaBaseY - astaH;
-  // Asta
-  ctx.beginPath();
-  ctx.moveTo(astaBaseX, astaBaseY);
-  ctx.lineTo(astaTopX, astaTopY);
-  ctx.strokeStyle = 'rgba(220,175,70,0.95)';
-  ctx.lineWidth = astaW;
-  ctx.stroke();
-  // Drappo: si apre sempre verso il centro della pista (direzione +nrmFlag = verso l'esterno)
-  // Sul rettilineo sinistro la normale punta a sinistra (fuori pista), quindi +nrmFlag
-  // punta fuori: usiamo -nrmFlag per andare verso il centro (destra)
-  // Calcoliamo la direzione orizzontale verso il centro della pista
-  const versoInterno = { x: -nrmFlag.x, y: -nrmFlag.y }; // verso il prato interno
-  // Vogliamo che il drappo si apra verso il centro → usiamo +nrmFlag (verso esterno/muro)
-  // In realtà sul lato sinistro nrmFlag punta verso sinistra (esterno),
-  // quindi apriamo il drappo verso destra usando -nrmFlag
-  const dW = Math.max(10, bandW * 0.60);
-  const dH = Math.max(8, bandW * 0.40);
-  const dX = astaTopX;
-  const dY = astaTopY;
-  // Punta del drappo nella direzione verso il centro (verso destra sul lato sinistro)
-  const puntaX = dX + versoInterno.x * dW;
-  const puntaY = dY + dH * 0.5;
-  // Triangolo bianco (metà superiore)
-  ctx.beginPath();
-  ctx.moveTo(dX, dY);
-  ctx.lineTo(puntaX, puntaY);
-  ctx.lineTo(dX, dY + dH * 0.5);
-  ctx.closePath();
-  ctx.fillStyle = '#F4F4F0';
-  ctx.fill();
-  // Triangolo nero (metà inferiore)
-  ctx.beginPath();
-  ctx.moveTo(dX, dY + dH * 0.5);
-  ctx.lineTo(puntaX, puntaY);
-  ctx.lineTo(dX, dY + dH);
-  ctx.closePath();
-  ctx.fillStyle = '#141414';
-  ctx.fill();
-  // Contorno
-  ctx.beginPath();
-  ctx.moveTo(dX, dY);
-  ctx.lineTo(puntaX, puntaY);
-  ctx.lineTo(dX, dY + dH);
-  ctx.closePath();
-  ctx.strokeStyle = 'rgba(0,0,0,.55)';
-  ctx.lineWidth = 0.7;
-  ctx.stroke();
+  // ─── Fonte Gaia (vista dall'alto) ───
+  // Semplice: rettangolo di marmo bianco con dentro un rettangolo azzurro (acqua).
+  // Posizione ricavata dalla foto aerea: parte alta della piazza, quasi sull'asse centrale.
+  const fonteRect = (function disegnaFonteGaia() {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    interni.forEach(p => {
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    });
+    const larghInt = maxX - minX;
+    const profInt  = maxY - minY;
+    const fw = Math.max(26, larghInt * 0.17);    // larghezza vasca
+    const fh = fw * 0.66;                        // altezza vasca
+    const fx = minX + larghInt * 0.52;
+    const fy = maxY - profInt * 0.850;
+    const x0 = fx - fw/2, y0 = fy - fh/2;
+
+    // Marmo bianco (con ombra leggera)
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.45)';
+    ctx.shadowBlur = Math.max(3, fw * 0.08);
+    ctx.shadowOffsetY = fw * 0.03;
+    ctx.fillStyle = '#F2EFE6';
+    ctx.fillRect(x0, y0, fw, fh);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(90,80,60,.5)';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(x0, y0, fw, fh);
+
+    // Acqua azzurra
+    const m = fw * 0.07;
+    ctx.fillStyle = '#8CCBE3';
+    ctx.fillRect(x0 + m, y0 + m, fw - m*2, fh - m*2);
+    ctx.strokeStyle = 'rgba(60,110,130,.55)';
+    ctx.lineWidth = 0.7;
+    ctx.strokeRect(x0 + m, y0 + m, fw - m*2, fh - m*2);
+    return { x0, y0, fw, fh };
+  })();
+
+  // ─── Geometria per la folla (disegnata a parte, nei livelli animati) ───
+  if (dati) {
+    const p0 = percorso[0], nr0 = normali[0];
+    dati.interni = interni; dati.esterni = esterni; dati.fonte = fonteRect; dati.normali = normali; dati.bandW = bandW;
+    dati.flag = { x: p0.x - nr0.x * bandW * 0.50, y: p0.y - nr0.y * bandW * 0.50 - bandW * 0.2, r: bandW * 0.45 };
+  }
+
+  // Bandierino: disegnato qui nel livello statico di base (così resta visibile anche prima
+  // che la corsa parta); durante la corsa viene ridisegnato in primo piano sopra i cavalli
+  // da disegnaFramePalio, tramite disegnaBandierinoPalio.
+  disegnaBandierinoPalio(ctx, percorso, normali, bandW);
+
+  // ─── Mossiere: sul selciato del tratto in basso senza folla (lato opposto al bandierino) ───
+  (function disegnaMossiere() {
+    // Posizione: il vuoto tra i contradaioli a sinistra (quadrato verde). Guarda il punto di pista più vicino.
+    const cx = W * 0.089, cy = W * 0.318;
+    let bi = 0, bd = Infinity;
+    percorso.forEach((p, i) => { const d = Math.hypot(p.x - cx, p.y - cy); if (d < bd) { bd = d; bi = i; } });
+    const u = bandW * 0.20;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.atan2(percorso[bi].y - cy, percorso[bi].x - cx));   // guarda verso la pista
+    // pedana di legno
+    ctx.fillStyle = 'rgba(0,0,0,.40)'; ctx.fillRect(-1.05 * u + u * 0.25, -1.5 * u + u * 0.3, 2.2 * u, 3 * u);
+    ctx.fillStyle = '#b98a54'; ctx.fillRect(-1.1 * u, -1.5 * u, 2.2 * u, 3 * u);
+    ctx.strokeStyle = 'rgba(60,30,10,.55)'; ctx.lineWidth = 0.8; ctx.strokeRect(-1.1 * u, -1.5 * u, 2.2 * u, 3 * u);
+    ctx.lineWidth = 0.5;
+    for (let k = -1; k <= 1; k += 0.5) { ctx.beginPath(); ctx.moveTo(-1.1 * u, k * u); ctx.lineTo(1.1 * u, k * u); ctx.stroke(); }
+    // braccia protese verso la pista (giacca scura) e mani
+    ctx.strokeStyle = '#15151c'; ctx.lineWidth = u * 0.34; ctx.lineCap = 'round';
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.moveTo(0, sg * 0.62 * u); ctx.lineTo(0.78 * u, sg * 0.42 * u); ctx.stroke(); });
+    ctx.fillStyle = '#d9a984';
+    [-1, 1].forEach(sg => { ctx.beginPath(); ctx.arc(0.9 * u, sg * 0.40 * u, u * 0.17, 0, Math.PI*2); ctx.fill(); });
+    // spalle
+    ctx.fillStyle = '#15151c'; ctx.beginPath(); ctx.ellipse(0, 0, u * 0.42, u * 0.78, 0, 0, Math.PI*2); ctx.fill();
+    // testa con cappello nero
+    ctx.fillStyle = '#d9a984'; ctx.beginPath(); ctx.arc(0.05 * u, 0, u * 0.40, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0d0d11'; ctx.beginPath(); ctx.arc(-0.02 * u, 0, u * 0.38, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,190,170,.45)'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.arc(-0.02 * u, 0, u * 0.22, 0, Math.PI*2); ctx.stroke();
+    ctx.restore();
+  })();
 }
+
 
 function disegnaFramePalio() {
   const st = window._palioAnimState;
@@ -3742,6 +4851,12 @@ function disegnaFramePalio() {
 
   // Dimensione pallini/cavalli: proporzionali alla larghezza pista (piccoli, realistici)
   const r = Math.max(4, W * 0.016);
+
+  // La pista sta dentro un canvas più grande (i palazzi le stanno attorno): i cavalli si disegnano
+  // nelle coordinate della pista, quindi si trasla l'origine del suo offset (ripristinato a fine funzione).
+  const offP = st.off || { x: 0, y: 0 };
+  ctx.save();
+  ctx.translate(offP.x, offP.y);
 
   // Frequenza del galoppo: cicli di falcata per giro di pista. Legata alla
   // distanza percorsa (progresso cumulativo) e non al tempo assoluto, così
@@ -3773,6 +4888,15 @@ function disegnaFramePalio() {
     }
     disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, st.paletteCavalli && st.paletteCavalli[nc]);
   });
+
+  // Il bandierino va ridisegnato in primo piano, SOPRA i cavalli: nella realtà sta sul bordo
+  // interno della pista verso il centro della piazza, e i cavalli le passano dietro (sotto), non sopra.
+  if (!st._normaliBandierino || st._normaliBandierino.n !== percorso.length) {
+    st._normaliBandierino = { n: percorso.length, normali: calcolaNormaliPista(percorso) };
+  }
+  disegnaBandierinoPalio(ctx, percorso, st._normaliBandierino.normali, Math.max(14, W * 0.085));
+
+  ctx.restore();
 }
 
 window.avviaSimulazionePalio = function() {
@@ -7826,6 +8950,81 @@ function assegnaStellinaCavallo(nomeCavallo, origine){
   else renderSchermataCorse();
 }
 
+/* ── Bonus intesa legato alle corse in provincia ──
+   Carriera Capitano: se si guardano le corse, alla fine della finale l'intesa con il fantino
+   vincitore cresce di un valore casuale da 5 a 10.
+   Carriera Fantino: solo se il giocatore ha partecipato di persona e si è qualificato alla
+   finale, l'intesa con una delle 17 contrade (scelta a caso) cresce di 5–10.
+   In entrambi i casi il giocatore viene avvisato con un pop-up a finale conclusa. ── */
+const BONUS_INTESA_PROVINCIA_MIN = 5;
+const BONUS_INTESA_PROVINCIA_MAX = 10;
+
+function bonusIntesaProvinciaCasuale(){
+  return BONUS_INTESA_PROVINCIA_MIN + Math.floor(Math.random()*(BONUS_INTESA_PROVINCIA_MAX - BONUS_INTESA_PROVINCIA_MIN + 1));
+}
+
+/* Capitano: intesa col fantino che ha vinto la finale. Restituisce {titolo, corpo} per il pop-up. */
+function applicaBonusIntesaFinaleProvinciaCapitano(corsa){
+  if(!S || !corsa || !corsa.finale || !corsa.finale.risultato || !corsa.finale.risultato.length) return null;
+  const vincitore = corsa.finale.risultato[0];
+  const nomeFantino = vincitore && vincitore.fantino && vincitore.fantino.nome;
+  if(!nomeFantino) return null;
+  if(!S.intesaFantini) S.intesaFantini = {};
+  const attuale = (S.intesaFantini[nomeFantino] !== undefined) ? S.intesaFantini[nomeFantino] : 0;
+  const bonus = bonusIntesaProvinciaCasuale();
+  const nuovo = Math.min(100, attuale + bonus);
+  S.intesaFantini[nomeFantino] = nuovo;
+  const effettivo = nuovo - attuale;
+  S.log.push(`Hai assistito alla finale delle corse in provincia: intesa con ${nomeFantino}, vincitore, +${effettivo} (ora ${nuovo}).`);
+  const esito = effettivo > 0
+    ? `Intesa: <strong style="color:var(--verde)">+${effettivo}</strong> (ora ${nuovo})`
+    : `L'intesa con lui è già al massimo (<strong style="color:var(--ocra)">${nuovo}</strong>).`;
+  return {
+    titolo: 'Un fantino da ricordare',
+    corpo: `Hai seguito la finale delle corse in provincia e sei rimasto colpito dalla vittoria di <strong style="color:var(--ocra)">${nomeFantino}</strong> su <strong style="color:var(--ocra)">${vincitore.cavallo.nome}</strong>.<br><br>${esito}`
+  };
+}
+
+/* Fantino: intesa con una contrada a caso, solo se il giocatore ha partecipato ed è in finale.
+   Le contrade con cui i rapporti sono bloccati dalla regola di rivalità (intesa 85+ con la loro
+   rivale storica) non possono essere aumentate, quindi vengono escluse dall'estrazione. */
+function applicaBonusIntesaFinaleProvinciaFantino(corsa){
+  if(!S || !corsa || !corsa.giocatorePartecipa || !corsa.finale) return null;
+  if(!corsa.finale.coppie.some(c=>c.giocatore)) return null;   // non qualificato alla finale
+  if(!S.intesaContrade) S.intesaContrade = {};
+  let candidate = CONTRADE.filter(c=>contradeCheBloccanoIntesa(c.nome).length === 0);
+  if(!candidate.length) candidate = CONTRADE.slice();
+  const contrada = candidate[Math.floor(Math.random()*candidate.length)];
+  const attuale = (S.intesaContrade[contrada.nome] !== undefined) ? S.intesaContrade[contrada.nome] : 50;
+  const bonus = bonusIntesaProvinciaCasuale();
+  const nuovo = Math.min(100, attuale + bonus);
+  S.intesaContrade[contrada.nome] = nuovo;
+  applicaRivalitaIntesaContrada(contrada.nome);
+  const effettivo = nuovo - attuale;
+  S.log.push(`Finale delle corse in provincia raggiunta: intesa con la Contrada del ${contrada.nome} +${effettivo} (ora ${nuovo}).`);
+  const esito = effettivo > 0
+    ? `Intesa: <strong style="color:var(--verde)">+${effettivo}</strong> (ora ${nuovo})`
+    : `L'intesa con questa contrada è già al massimo (<strong style="color:var(--ocra)">${nuovo}</strong>).`;
+  return {
+    titolo: 'Sei stato notato',
+    corpo: `Il tuo arrivo in finale alle corse in provincia non è passato inosservato: la Contrada del <strong style="color:var(--ocra)">${contrada.nome}</strong> ti ha visto correre e ha iniziato a tenerti d'occhio.<br><br>${esito}`
+  };
+}
+
+function mostraPopupBonusIntesaProvincia(info){
+  if(!info) return;
+  const ov = document.createElement('div');
+  ov.className='overlay';
+  ov.innerHTML=`
+  <div class="popup">
+    <div class="popup-icon">🤝</div>
+    <div class="popup-title">${info.titolo}</div>
+    <div class="popup-body">${info.corpo}</div>
+    <button class="btn gold w" onclick="this.closest('.overlay').remove()">Capito</button>
+  </div>`;
+  R('APP').appendChild(ov);
+}
+
 /* ── Registra nello score annuale l'esito di una gara per ogni cavallo partecipante ── */
 function registraScoreGara(risultato, eBatteria){
   if(!S.scoreCavalliAnno) S.scoreCavalliAnno = {};
@@ -7891,12 +9090,17 @@ function vaiAllaFinaleProvincia(){
 function disputaFinale(){
   if(!S || !S.corsaProvinciaMese || !S.corsaProvinciaMese.finale) return;
   const corsa = S.corsaProvinciaMese;
+  if(corsa.finale.completata) return;
   const pista = PISTE_PROVINCIA[corsa.pistaChiave];
   corsa.finale.risultato = simulaGara(corsa.finale.coppie, pista);
   corsa.finale.completata = true;
   registraScoreGara(corsa.finale.risultato, false);
+  // Guardare le corse in provincia fa crescere l'intesa con il fantino vincitore della finale
+  const esitoIntesa = applicaBonusIntesaFinaleProvinciaCapitano(corsa);
+  verificaObiettivi();
   salvaCorrente();
   renderSchermataCorse();
+  mostraPopupBonusIntesaProvincia(esitoIntesa);
 }
 
 /* Passaggio esplicito dalla schermata della finale (con risultato visibile) alla
@@ -10542,6 +11746,7 @@ function avviaDisputaFinaleFantino(){
 function disputaFinaleFantino(bonusVelocitaMossaGiocatore){
   if(!S || !S.corsaProvinciaMese || !S.corsaProvinciaMese.finale) return;
   const corsa = S.corsaProvinciaMese;
+  if(corsa.finale.completata) return;
   const pista = PISTE_PROVINCIA[corsa.pistaChiave];
   corsa.finale.coppie.forEach(c=>{ if(c.giocatore) c.bonusVelocitaMossa = bonusVelocitaMossaGiocatore; });
   corsa.finale.risultato = simulaGara(corsa.finale.coppie, pista);
@@ -10560,9 +11765,13 @@ function disputaFinaleFantino(bonusVelocitaMossaGiocatore){
       S.log.push('Vittoria in finale: Bravura +1.');
     }
   }
+  // Se il giocatore ha partecipato di persona ed è arrivato in finale, cresce l'intesa
+  // con una delle 17 contrade scelta a caso (chi osserva soltanto non ottiene nulla)
+  const esitoIntesa = applicaBonusIntesaFinaleProvinciaFantino(corsa);
   verificaObiettivi();
   salvaCorrente();
   renderSchermataCorseFantino();
+  mostraPopupBonusIntesaProvincia(esitoIntesa);
 }
 
 function concludiCorseProvinciaFantino(){
@@ -12831,6 +14040,16 @@ function avviaMossaCorsaFantino(tipoPalio){
     velocita = Math.max(0.8, velocita * 0.7);
   }
 
+  // Dati per la scena "I cavalli al canapo", mostrata sotto al minigioco solo per il Palio vero
+  // e proprio della Carriera Fantino (non per prove/tratta/corse in provincia): posizione di ogni
+  // contrada stabilita dall'estrazione al canapo, e palette di colore del cavallo (per lo stesso
+  // disegno realistico usato nella simulazione grafica della corsa).
+  const paletteCanapoContrade = {};
+  partecipanti.forEach(nomeContrada => {
+    paletteCanapoContrade[nomeContrada] = costruisciPaletteCavallo(estraiColoreCavalloDB(trovaCavalloPerContrada(nomeContrada)));
+  });
+  const assegnazioniCanapo = (datiPalio.canapoFantino && datiPalio.canapoFantino.assegnazioni) || {};
+
   window._mossaState = {
     contesto: 'corsaFantino',
     tipoPalio,
@@ -12840,7 +14059,10 @@ function avviaMossaCorsaFantino(tipoPalio){
     posizione: 0,
     direzione: 1,
     fermata: false,
-    timerId: null
+    timerId: null,
+    canapoPartecipanti: partecipanti.slice(),
+    canapoAssegnazioni: assegnazioniCanapo,
+    canapoPalette: paletteCanapoContrade
   };
   renderMinigiocoMossa();
   avviaTickMossa();
@@ -13283,6 +14505,15 @@ function renderMinigiocoMossa(){
   const inizioZona = Math.max(0, st.centroObiettivo - st.ampiezzaZona/2);
   const fineZona = Math.min(100, st.centroObiettivo + st.ampiezzaZona/2);
 
+  // La scena "I cavalli al canapo" viene mostrata sotto al minigioco SOLO per il Palio vero e
+  // proprio della Carriera Fantino (contesto 'corsaFantino'), non per prove, tratta o corse in
+  // provincia, che riusano lo stesso motore di minigioco con altri contesti.
+  const canapoSceneHtml = (st.contesto === 'corsaFantino') ? `
+      <div class="card" style="padding:12px 10px;margin-top:14px">
+        <div style="font-family:var(--fn);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:rgba(200,153,30,.5);text-align:center;margin-bottom:8px">I cavalli al canapo</div>
+        <canvas id="CANVAS_CANAPO_MOSSA" style="width:100%;max-width:420px;margin:0 auto;display:block;border-radius:10px;border:1px solid rgba(200,153,30,.25)"></canvas>
+      </div>` : '';
+
   setMain(`
   <div>
     <div class="hdr">
@@ -13300,9 +14531,340 @@ function renderMinigiocoMossa(){
         </div>
         <button class="btn gold w" style="margin-top:18px" onclick="fermaMinigiocoMossa()">⏹ Ferma!</button>
       </div>
+      ${canapoSceneHtml}
     </div>
   </div>
   `);
+
+  if (st.contesto === 'corsaFantino') setTimeout(inizializzaCanvasCanapoMossa, 60);
+}
+
+/* ═══════════════════════════════════════════════
+   SCENA "I CAVALLI AL CANAPO" — Carriera Fantino
+   Mostrata sotto al minigioco "Ferma la barra" solo quando questo viene
+   giocato per il Palio vero e proprio (contesto 'corsaFantino'), mai per
+   prove/tratta/corse in provincia. Riusa esattamente gli stessi elementi
+   grafici della simulazione della corsa (disegnaCavalloPalio, con lo
+   stemma di contrada disegnato da disegnaPallinoPalio, e la stessa
+   funzione di disegno della folla disegnaFollaTile), così l'aspetto è
+   coerente in tutto il gioco. I cavalli sono nelle posizioni stabilite
+   dall'estrazione al canapo (window._mossaState.canapoAssegnazioni): le
+   posizioni 1-9 in fila sul canapo principale (9 vicino al mossiere, 1
+   vicino alla barriera), la posizione 10 "di rincorsa" separata, più
+   indietro. Tutti i cavalli hanno la testa rivolta verso il centro della
+   pista (perpendicolarmente alla fila), non lungo il canapo. Nessun
+   cavallo è fermo: ognuno oscilla lateralmente (destra-sinistra) e
+   avanti-indietro attorno alla propria posizione, con le zampe che
+   "scalpitano" sul posto, ma senza mai cambiare l'orientamento (non si
+   girano mai), restando sempre entro il limite della barriera. Una
+   barriera verde scura separa cavalli e mossiere dai contradaioli: i
+   canapi partono da essa e arrivano, il primo, al box del mossiere, il
+   secondo al verrocchino (anch'esso verde scuro come la barriera). */
+window._canapoMossaState = null;
+window._canapoMossaRAF = null;
+
+function inizializzaCanvasCanapoMossa(){
+  const canvas = R('CANVAS_CANAPO_MOSSA');
+  const st = window._mossaState;
+  if (!canvas || !st || st.contesto !== 'corsaFantino') return;
+
+  const Wc = canvas.offsetWidth || 320;
+  const H = Math.round(Wc * 0.48);
+  canvas.width = Wc;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const partecipanti = st.canapoPartecipanti || [];
+  const assegnazioni = st.canapoAssegnazioni || {};
+  const palette = st.canapoPalette || {};
+
+  // Se per qualche motivo l'estrazione non copre tutte le 10 posizioni, si ripiega
+  // sull'ordine dei partecipanti (non dovrebbe succedere: si arriva qui solo a
+  // canapo.completata true).
+  const ordine = {};
+  for (let p = 1; p <= 10; p++) ordine[p] = assegnazioni[p] || partecipanti[p-1] || null;
+
+  const r = Math.max(7, Wc * 0.021);
+
+  // ─── Barriera verde scura tra cavalli/mossiere e contradaioli ───
+  // È una fascia inclinata sul lato destro del canvas; xBarriera(y) restituisce
+  // la coordinata x del suo bordo sinistro (quello verso i cavalli) per una
+  // data altezza y. Cavalli e canapi non devono mai superarlo; i contradaioli
+  // stanno sempre oltre il bordo destro (bordo sinistro + spessore).
+  const barrY0 = -0.08 * H, barrY1 = 1.08 * H;
+  const barrX0 = 0.895 * Wc, barrX1 = 0.815 * Wc;
+  const barrieraSpessore = Math.max(10, Wc * 0.030);
+  const xBarriera = (y) => {
+    const fr = (y - barrY0) / (barrY1 - barrY0);
+    return barrX0 + (barrX1 - barrX0) * fr;
+  };
+
+  // Le 9 posizioni in fila sul canapo principale: i=0 → posizione 9 (vicino al
+  // mossiere), i=8 → posizione 1 (vicino alla barriera), come nell'estrazione reale.
+  const slots = [];
+  for (let i = 0; i < 9; i++) {
+    const pos = 9 - i;
+    slots.push({ pos, x: (0.20 + i*0.078) * Wc, y: (0.26 + i*0.032) * H });
+  }
+  // Direzione della fila (usata solo per calcolare la geometria, non per l'orientamento
+  // dei cavalli): dal primo all'ultimo slot
+  const dxFila = slots[8].x - slots[0].x, dyFila = slots[8].y - slots[0].y;
+  const angoloFila = Math.atan2(dyFila, dxFila);
+  // I cavalli guardano perpendicolarmente alla fila, verso il centro della pista
+  // (90° in senso antiorario rispetto alla direzione della fila)
+  const angoloCavalli = angoloFila - Math.PI/2;
+
+  const margineBarrieraCavallo = r * 0.9;
+  // I cavalli in fila (non quello di rincorsa) vengono arretrati di poco rispetto
+  // alla propria posizione sul canapo, lungo la direzione in cui sono rivolti
+  // (angoloCavalli, verso il centro pista): a riposo restano così dietro alla
+  // corda, e solo nel momento dell'oscillazione in avanti la punta del muso
+  // arriva a sporgere leggermente oltre il canapo, invece di sovrapporvisi.
+  const arretramentoFila = r * 0.55;
+  const cavalli = slots.map(s => {
+    const bx = s.x - Math.cos(angoloCavalli)*arretramentoFila;
+    const by = s.y - Math.sin(angoloCavalli)*arretramentoFila;
+    return {
+      nomeCon: ordine[s.pos],
+      x: bx, y: by, angolo: angoloCavalli,
+      limiteX: xBarriera(by) - margineBarrieraCavallo,
+      fLat:  0.30 + Math.random()*0.20, fLong: 0.26 + Math.random()*0.18,
+      pLat:  Math.random()*Math.PI*2,   pLong: Math.random()*Math.PI*2,
+      pGal:  Math.random()*Math.PI*2
+    };
+  });
+
+  // Il cavallo "di rincorsa" (posizione 10): separato dalla fila, più indietro e in basso
+  const rincX = 0.075 * Wc, rincY = 0.66 * H;
+  const rincorsa = {
+    nomeCon: ordine[10], x: rincX, y: rincY, angolo: angoloCavalli,
+    limiteX: xBarriera(rincY) - margineBarrieraCavallo,
+    fLat:  0.30 + Math.random()*0.20, fLong: 0.26 + Math.random()*0.18,
+    pLat:  Math.random()*Math.PI*2,   pLong: Math.random()*Math.PI*2,
+    pGal:  Math.random()*Math.PI*2
+  };
+
+  // Mossiere: al capo del canapo principale, rivolto verso la fila dei cavalli
+  const mossiereX = 0.085 * Wc, mossiereY = 0.155 * H;
+  const uMossiere = Math.max(6, Wc * 0.030);
+  // Il verrocchino (piccolo argano di legno/metallo, qui dello stesso verde scuro
+  // della barriera): sta dietro al cavallo di rincorsa
+  const verrX = rincX + Wc*0.055, verrY = rincY - H*0.055;
+  const uVerrocchino = Math.max(5, Wc * 0.017);
+
+  // I due canapi partono entrambi dalla barriera: il primo arriva al box del
+  // mossiere, il secondo al verrocchino.
+  const capoA2 = { x: mossiereX + Math.cos(angoloFila)*uMossiere*1.1, y: mossiereY + Math.sin(angoloFila)*uMossiere*1.1 };
+  // Il canapo principale deve passare rasente al petto del cavallo più vicino alla
+  // barriera (ultimo della fila, slot[8], posizione 1), non a un'altezza fissa:
+  // altrimenti il tratto risulta troppo in alto rispetto ai cavalli in fila.
+  // Si prolunga quindi la retta dal mossiere fino a incontrare la barriera.
+  const pettoUltimoCavallo = {
+    x: slots[8].x + Math.cos(angoloCavalli)*r,
+    y: slots[8].y + Math.sin(angoloCavalli)*r
+  };
+  const dCordaA = { x: pettoUltimoCavallo.x - capoA2.x, y: pettoUltimoCavallo.y - capoA2.y };
+  const bBarr = (barrX1 - barrX0) / (barrY1 - barrY0);
+  const aBarr = barrX0 - bBarr * barrY0;
+  const tCordaA = (aBarr + bBarr*capoA2.y - capoA2.x) / (dCordaA.x - bBarr*dCordaA.y);
+  const capoA1 = { x: capoA2.x + dCordaA.x*tCordaA, y: capoA2.y + dCordaA.y*tCordaA };
+  const capoB2 = { x: verrX + Math.cos(angoloFila)*uVerrocchino*1.3, y: verrY + Math.sin(angoloFila)*uVerrocchino*1.3 };
+  const yBarrieraB = rincY + H*0.16;
+  const capoB1 = { x: xBarriera(yBarrieraB), y: yBarrieraB };
+
+  // Folla di contradaioli: solo oltre la barriera, poche persone ma grandi
+  // (quasi come il mossiere), con gli stessi colori e lo stesso stile di
+  // disegno/animazione della folla della simulazione grafica della corsa.
+  const nomiFolla = partecipanti.length ? partecipanti : Object.keys(COLORI_CONTRADE).slice(0,10);
+  const margineFolla = barrieraSpessore + Wc*0.018;
+  const folla = generaFollaCanapoMossa(nomiFolla, xBarriera, margineFolla, Wc, H);
+  const follaScalaDisegno = Wc * 2.8; // "W" fittizio passato a disegnaFollaTile per ingrandire le figure
+
+  window._canapoMossaState = {
+    canvas, ctx, Wc, H, r, palette,
+    cavalli, rincorsa, mossiereX, mossiereY, angoloFila,
+    verrX, verrY, uMossiere, uVerrocchino,
+    capoA1, capoA2, capoB1, capoB2,
+    xBarriera, barrY0, barrY1, barrieraSpessore,
+    F: folla.F, T: folla.T, follaScalaDisegno,
+    t0: performance.now()
+  };
+
+  if (window._canapoMossaRAF) cancelAnimationFrame(window._canapoMossaRAF);
+  const mioState = window._canapoMossaState;
+  (function loop(ts){
+    if (window._canapoMossaState !== mioState || !canvas.isConnected) { window._canapoMossaRAF = null; return; }
+    disegnaScenaCanapoMossa(mioState, (ts - mioState.t0) / 1000);
+    window._canapoMossaRAF = requestAnimationFrame(loop);
+  })(performance.now());
+}
+
+/* Genera la folla di contradaioli oltre la barriera (a destra di essa, fino al
+   bordo del canvas): poche persone ma grandi (l'ingrandimento vero e proprio
+   avviene in fase di disegno, vedi follaScalaDisegno), riusando la stessa
+   tavolozza di colori di contrada (coloriContradaFolla) e la stessa funzione
+   di disegno/animazione (disegnaFollaTile) della folla della simulazione
+   grafica del Palio, così l'aspetto e il movimento in loop sono identici. */
+function generaFollaCanapoMossa(contrade, xBarriera, margine, Wc, H){
+  let seed = 130725 + contrade.length;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const TAU = Math.PI * 2;
+  const coloriCon = contrade.map(coloriContradaFolla);
+  const CAMICIE = ['#2B2B30','#3A3F48','#4B5563','#6A7480','#8E8A80','#B8B2A5','#2E3A4E','#4A4038','#5B5348','#1F1F1F','#7A6A58','#9A9488'];
+  const CAPELLI = ['#1A1210','#1A1210','#2E1E14','#2E1E14','#4A3222','#6B4A2A','#B89A5E','#8E8E8E','#D8D8D8','#C9A184'];
+  // Passo più largo di quello della folla in piazza (la dimensione vera e propria
+  // è decisa in disegnaFollaTile tramite follaScalaDisegno, qui conta solo per non
+  // farle sovrapporre troppo), ma comunque abbastanza fitto da avere più
+  // contradaioli oltre la barriera invece di poche figure isolate.
+  const passo = Math.max(12, Wc * 0.040);
+  const rigaH = passo * 0.90;
+  const persone = [];
+  let riga = 0;
+  for (let y = 0; y <= H; y += rigaH, riga++) {
+    const xMin = xBarriera(y) + margine;
+    for (let x = xMin + (riga%2 ? passo/2 : 0); x <= Wc - passo*0.35; x += passo) {
+      const px = x + (rnd()-0.5)*passo*0.35;
+      const py = y + (rnd()-0.5)*passo*0.35;
+      if (xBarriera(py) + margine > px) continue; // non oltrepassare la barriera con il jitter
+      const b = Math.floor(rnd()*contrade.length);
+      const scarf = coloriCon[b][rnd()<0.5?0:1];
+      persone.push({
+        x: px, y: py,
+        camicia: CAMICIE[Math.floor(rnd()*CAMICIE.length)],
+        capelli: CAPELLI[Math.floor(rnd()*CAPELLI.length)],
+        scarf, sguardo: Math.PI + (rnd()-0.5)*1.2,
+        p1: rnd()*TAU, p2: rnd()*TAU, p3: rnd()*TAU, pj: rnd()*TAU,
+        f1: 0.22+rnd()*0.45, f2: 0.22+rnd()*0.45, f3: 0.15+rnd()*0.30, fj: 1.1+rnd()*0.9,
+        saltatore: rnd() < 0.38
+      });
+    }
+  }
+  const n = persone.length;
+  function raggruppa(campo){
+    const m = new Map();
+    for (let i = 0; i < n; i++) { const c = persone[i][campo]; if (!c) continue; if (!m.has(c)) m.set(c, []); m.get(c).push(i); }
+    return [...m.entries()].map(([col, idx]) => ({ col, idx }));
+  }
+  const idxTutti = []; for (let i=0;i<n;i++) idxTutti.push(i);
+  const T = { idx: idxTutti, gCamicie: raggruppa('camicia'), gScarf: raggruppa('scarf'), gCapelli: raggruppa('capelli'), bandiere: [] };
+  const F = { persone, n, PX: new Float32Array(n), PY: new Float32Array(n), PR: new Float32Array(n), J: new Float32Array(n) };
+  return { F, T };
+}
+
+/* Disegna un breve tratto di canapo (fune) teso tra due punti, con un leggero
+   cedimento centrale per un effetto più naturale. */
+function disegnaCordaCanapo(ctx, x1, y1, x2, y2){
+  const sag = Math.hypot(x2-x1, y2-y1) * 0.02;
+  const mx = (x1+x2)/2, my = (y1+y2)/2 + sag;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(mx,my,x2,y2);
+  ctx.strokeStyle = 'rgba(30,18,8,.55)'; ctx.lineWidth = 4.2; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(mx,my,x2,y2);
+  ctx.strokeStyle = '#C9A876'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.stroke();
+}
+
+/* Barriera verde scura che separa cavalli e mossiere dai contradaioli: una
+   fascia inclinata piena, dallo stesso verde del verrocchino. */
+function disegnaBarrieraCanapo(ctx, xBarriera, y0, y1, spessore){
+  const xTop = xBarriera(y0), xBot = xBarriera(y1);
+  ctx.beginPath();
+  ctx.moveTo(xTop, y0);
+  ctx.lineTo(xTop + spessore, y0);
+  ctx.lineTo(xBot + spessore, y1);
+  ctx.lineTo(xBot, y1);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(xTop, 0, xTop + spessore, 0);
+  grad.addColorStop(0, '#16300E');
+  grad.addColorStop(0.5, '#26501A');
+  grad.addColorStop(1, '#16300E');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+/* Il verrocchino: piccolo argano di legno a cui è fissato il secondo canapo,
+   dipinto dello stesso verde scuro della barriera. */
+function disegnaVerrocchino(ctx, cx, cy, angolo, u){
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angolo);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(-u*0.85 + u*0.12, -u*0.85 + u*0.12, u*1.7, u*1.7);
+  const grad = ctx.createLinearGradient(-u, -u, u, u);
+  grad.addColorStop(0, '#2c5a1c');
+  grad.addColorStop(1, '#16300E');
+  ctx.fillStyle = grad;
+  ctx.fillRect(-u, -u, u*2, u*2);
+  ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = Math.max(0.6, u*0.08); ctx.strokeRect(-u, -u, u*2, u*2);
+  ctx.restore();
+}
+
+/* Il mossiere: stessa identica figura (pedana di legno, giacca scura, braccia
+   protese, cappello) disegnata da disegnaMossiere() nella pista reale del Palio,
+   solo riparametrizzata su posizione/angolo/scala per questa scena. */
+function disegnaMossiereCanapo(ctx, cx, cy, angolo, u){
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angolo);
+  ctx.fillStyle = 'rgba(0,0,0,.40)'; ctx.fillRect(-1.05*u + u*0.25, -1.5*u + u*0.3, 2.2*u, 3*u);
+  ctx.fillStyle = '#b98a54'; ctx.fillRect(-1.1*u, -1.5*u, 2.2*u, 3*u);
+  ctx.strokeStyle = 'rgba(60,30,10,.55)'; ctx.lineWidth = 0.8; ctx.strokeRect(-1.1*u, -1.5*u, 2.2*u, 3*u);
+  ctx.lineWidth = 0.5;
+  for (let k=-1;k<=1;k+=0.5){ ctx.beginPath(); ctx.moveTo(-1.1*u,k*u); ctx.lineTo(1.1*u,k*u); ctx.stroke(); }
+  ctx.strokeStyle = '#15151c'; ctx.lineWidth = u*0.34; ctx.lineCap='round';
+  [-1,1].forEach(sg => { ctx.beginPath(); ctx.moveTo(0, sg*0.62*u); ctx.lineTo(0.78*u, sg*0.42*u); ctx.stroke(); });
+  ctx.fillStyle = '#d9a984';
+  [-1,1].forEach(sg => { ctx.beginPath(); ctx.arc(0.9*u, sg*0.40*u, u*0.17, 0, Math.PI*2); ctx.fill(); });
+  ctx.fillStyle = '#15151c'; ctx.beginPath(); ctx.ellipse(0,0,u*0.42,u*0.78,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#d9a984'; ctx.beginPath(); ctx.arc(0.05*u,0,u*0.40,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#0d0d11'; ctx.beginPath(); ctx.arc(-0.02*u,0,u*0.38,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(200,190,170,.45)'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.arc(-0.02*u,0,u*0.22,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+/* Un cavallo "vivo" al canapo: non è mai fermo, oscilla di poco a destra e a
+   sinistra e avanti e indietro rispetto alla propria posizione assegnata (con le
+   zampe che scalpitano sul posto), ma l'angolo di marcia resta sempre lo stesso
+   (testa rivolta verso il centro della pista): non si gira mai, e non supera
+   mai il limite della barriera (c.limiteX). Riusa esattamente
+   disegnaCavalloPalio, la stessa funzione della corsa vera, quindi anche lo
+   stemma di contrada sopra il cavallo (disegnaPallinoPalio) è identico. */
+function disegnaCavalloAlCanapo(ctx, c, t, r, paletteMap){
+  const along = { x: Math.cos(c.angolo), y: Math.sin(c.angolo) };
+  const perp  = { x: -Math.sin(c.angolo), y: Math.cos(c.angolo) };
+  const lat  = Math.sin(t*c.fLat*Math.PI*2  + c.pLat)  * r*0.42; // destra-sinistra
+  const lung = Math.sin(t*c.fLong*Math.PI*2 + c.pLong) * r*0.58; // avanti-indietro
+  let x = c.x + along.x*lung + perp.x*lat;
+  let y = c.y + along.y*lung + perp.y*lat;
+  if (typeof c.limiteX === 'number' && x > c.limiteX) x = c.limiteX; // mai oltre la barriera
+  const fase = t*2.4 + c.pGal; // zampe che scalpitano sul posto
+  const palette = (c.nomeCon && paletteMap && paletteMap[c.nomeCon]) || null;
+  disegnaCavalloPalio(ctx, x, y, r, c.nomeCon, c.angolo, fase, palette);
+}
+
+function disegnaScenaCanapoMossa(S, t){
+  const { ctx, Wc, H, r } = S;
+  ctx.clearRect(0, 0, Wc, H);
+  ctx.fillStyle = '#C8991E';
+  ctx.fillRect(0, 0, Wc, H);
+
+  // Barriera verde scura tra cavalli/mossiere e contradaioli
+  disegnaBarrieraCanapo(ctx, S.xBarriera, S.barrY0, S.barrY1, S.barrieraSpessore);
+
+  // Folla di contradaioli, solo oltre la barriera: stessi colori e movimenti in
+  // loop della simulazione grafica, ma ingrandita (quasi come il mossiere)
+  disegnaFollaTile(ctx, S.F, S.T, S.follaScalaDisegno, t);
+
+  // I due canapi: dalla barriera al box del mossiere, e dalla barriera al verrocchino
+  disegnaCordaCanapo(ctx, S.capoA1.x, S.capoA1.y, S.capoA2.x, S.capoA2.y);
+  disegnaCordaCanapo(ctx, S.capoB1.x, S.capoB1.y, S.capoB2.x, S.capoB2.y);
+
+  // Il verrocchino e il mossiere
+  disegnaVerrocchino(ctx, S.verrX, S.verrY, S.angoloFila, S.uVerrocchino);
+  disegnaMossiereCanapo(ctx, S.mossiereX, S.mossiereY, S.angoloFila, S.uMossiere);
+
+  // Il cavallo di rincorsa e i 9 in fila al canapo principale, tutti con la testa
+  // rivolta verso il centro della pista
+  disegnaCavalloAlCanapo(ctx, S.rincorsa, t, r*0.92, S.palette);
+  S.cavalli.forEach(c => disegnaCavalloAlCanapo(ctx, c, t, r, S.palette));
 }
 
 /* Aggiorna solo la posizione del cursore via DOM, senza ridisegnare l'intera schermata

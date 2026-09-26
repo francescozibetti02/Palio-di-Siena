@@ -13,7 +13,7 @@ const CAVALLI_DB = [
   { nome:'Diodoro',              velocita:5, accelerazione:5, tenuta_curva:5, resistenza:4, nervosismo:2, colore:'#6b4226' }, // baio
   { nome:'Benitos',              velocita:5, accelerazione:4, tenuta_curva:4, resistenza:4, nervosismo:1, colore:'#a0522d' }, // sauro
 
-  { nome:"Viso D'angelo",        velocita:4, accelerazione:4, tenuta_curva:5, resistenza:4, nervosismo:3, colore:'#c9c9c2' }, // grigio chiaro
+  { nome:"Viso D'angelo",        velocita:4, accelerazione:4, tenuta_curva:5, resistenza:4, nervosismo:3, colore:'#2e2803' }, // grigio chiaro
   { nome:'Zio Frac',             velocita:5, accelerazione:3, tenuta_curva:5, resistenza:4, nervosismo:2, colore:'#241a12' }, // morello
   { nome:'Dollaro',              velocita:5, accelerazione:3, tenuta_curva:5, resistenza:4, nervosismo:2, colore:'#8a5a2e' }, // baio dorato
   { nome:'Zenis',                velocita:4, accelerazione:4, tenuta_curva:5, resistenza:3, nervosismo:3, colore:'#b5651d' }, // sauro chiaro
@@ -54,7 +54,7 @@ const CAVALLI_DB = [
   { nome:'Entu de Pedra Ulpu',   velocita:3, accelerazione:3, tenuta_curva:3, resistenza:3, nervosismo:3, colore:'#6b4226' }, // baio
   { nome:'Donrodrigo',           velocita:4, accelerazione:4, tenuta_curva:3, resistenza:4, nervosismo:3, colore:'#3a2a1a' }, // morello scuro
   { nome:'Eberardo',             velocita:2, accelerazione:2, tenuta_curva:2, resistenza:2, nervosismo:3, colore:'#8a5a2e' }, // baio dorato
-  { nome:'Canarinu',             velocita:4, accelerazione:3, tenuta_curva:3, resistenza:3, nervosismo:2, colore:'#c08a52' }, // sauro chiaro
+  { nome:'Canarinu',             velocita:4, accelerazione:3, tenuta_curva:3, resistenza:3, nervosismo:2, colore:'#a37441' }, // sauro chiaro
 
   { nome:'Arestetulesu',         velocita:3, accelerazione:2, tenuta_curva:2, resistenza:2, nervosismo:3, colore:'#6b4226' }, // baio
   { nome:'Euskaldi',             velocita:2, accelerazione:3, tenuta_curva:2, resistenza:3, nervosismo:2, colore:'#5a3d20' }, // baio scuro
