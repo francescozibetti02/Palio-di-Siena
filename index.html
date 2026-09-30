@@ -4918,7 +4918,120 @@ window.avviaSimulazionePalio = function() {
     st.latoSorpasso[nc] = null;
   });
 
-  aggiornaVelocitaGiro(st, 0);
+  /* FIX: l'animazione è guidata dai TEMPI UFFICIALI della simulazione (classificaGiri),
+     non più da velocità casuali basate sul piazzamento. Per ogni contrada costruiamo i
+     checkpoint cumulativi [0, fine giro 1, fine giro 2, fine giro 3]: la posizione
+     disegnata è l'interpolazione di questi tempi, quindi chi taglia per primo il
+     traguardo nell'animazione è SEMPRE il vincitore ufficiale (e l'ordine d'arrivo
+     coincide con la classifica finale mostrata e con l'albo d'oro). */
+  /* Tempi "visivi". Il motore di gara produce differenze di velocità molto grandi (il
+     vincitore può battere gli ultimi di parecchi giri): seguirle alla lettera darebbe un
+     leader lontanissimo e cavalli fermi. Dei tempi ufficiali usiamo quindi solo l'ORDINE e
+     una versione COMPRESSA dei distacchi: a ogni fine giro nessun cavallo sta più di ~0,22
+     giri dietro al primo. La funzione è strettamente crescente col distacco (+ un piccolo
+     termine legato alla posizione), perciò l'ordine a ogni traguardo di giro, e quindi
+     l'ordine d'arrivo, è IDENTICO a quello ufficiale. */
+  const nCon = st.contrade.length;
+  const rawCum = {};   // { contrada: [c1, c2, c3] } tempi ufficiali cumulativi a fine giro
+  st.contrade.forEach(nc => {
+    const arr = [];
+    for (let g = 0; g < st.totalGiri; g++) {
+      const riga = (st.classificaGiri[g] || []).find(e => e.nomeContrada === nc);
+      const prev = g ? arr[g - 1] : 0;
+      arr.push(riga && isFinite(riga.cumulativo) ? Math.max(riga.cumulativo, prev + 1e-6) : prev + 1);
+    }
+    rawCum[nc] = arr;
+  });
+  const minG = [], lapRef = [];
+  for (let g = 0; g < st.totalGiri; g++) {
+    minG.push(Math.min(...st.contrade.map(nc => rawCum[nc][g])));
+    lapRef.push(minG[g] - (g ? minG[g - 1] : 0));   // durata del giro del "primo"
+  }
+  /* Distacco visivo (in giri del primo) = spaziatura regolare per posizione + un piccolo
+     extra che dipende dal distacco reale (saturante). Con i distacchi reali saturati tutti
+     gli inseguitori finivano ammassati e il primo isolato; così invece il gruppo si
+     distribuisce in modo naturale e il primo non scappa. Entrambi i termini crescono con la
+     posizione, quindi l'ordine ufficiale è sempre rispettato. */
+  const PASSO_POS = 0.024;   // giri di distacco per ogni posizione in classifica
+  const EXTRA_MAX = 0.04;    // extra massimo legato al distacco reale
+  st.checkpoint = {};
+  st.contrade.forEach(nc => { st.checkpoint[nc] = [0]; });
+  for (let g = 0; g < st.totalGiri; g++) {
+    const ord = st.contrade.slice().sort((x, y) => rawCum[x][g] - rawCum[y][g]);
+    ord.forEach((nc, rank) => {
+      const dLap = (rawCum[nc][g] - minG[g]) / lapRef[g];
+      const gap = PASSO_POS * rank + EXTRA_MAX * (1 - Math.exp(-dLap / 0.15));
+      const prevV = st.checkpoint[nc][g];
+      st.checkpoint[nc].push(Math.max(minG[g] + gap * lapRef[g], prevV + 1e-6));
+    });
+  }
+  /* Velocità CONTINUA tra un giro e l'altro: interpolazione monotona di Hermite (PCHIP)
+     sui punti (tempo di fine giro, giri completati). Niente più salti di velocità ai
+     traguardi dei giri, e nessun cavallo può mai andare all'indietro. */
+  st.pendenza = {};
+  st.contrade.forEach(nc => {
+    const t = st.checkpoint[nc], n = t.length;                   // n = giri + 1 punti
+    const h = [], d = [];
+    for (let k = 0; k < n - 1; k++) { h.push(t[k+1] - t[k]); d.push(1 / h[k]); }
+    const m = new Array(n);
+    m[0] = d[0]; m[n-1] = d[n-2];
+    for (let k = 1; k < n - 1; k++) {
+      const w1 = 2*h[k] + h[k-1], w2 = h[k] + 2*h[k-1];
+      m[k] = (w1 + w2) / (w1 / d[k-1] + w2 / d[k]);              // media armonica pesata
+    }
+    st.pendenza[nc] = m;
+  });
+  const tMin = Math.min(...st.contrade.map(nc => st.checkpoint[nc][st.totalGiri]));
+  st.msSimPerMsReale = tMin / 28000;
+  st.tMin = tMin;
+  st.tMax = Math.max(...st.contrade.map(nc => st.checkpoint[nc][st.totalGiri]));
+  st.tempoAnim = 0; // tempo simulato trascorso (stesse unità dei tempi ufficiali)
+
+  /* SUSPENSE: dentro ogni giro ogni cavallo ha una piccola "onda" casuale di avanzamento
+     (sin²(πu) e sin²(πu)·sin(2πu), con u = frazione di giro; pendenza nulla ai traguardi). Le onde valgono ESATTAMENTE 0 ai
+     traguardi dei giri, quindi a fine giro le posizioni sono quelle dei tempi ufficiali
+     e l'ordine d'arrivo non cambia mai. In mezzo al giro invece i cavalli si avvicinano,
+     si superano e si riprendono. L'ultimo giro ha onde più ampie per un finale incerto.
+     Pendenza massima dell'onda < 0,6 → nessun cavallo va mai all'indietro. */
+  const AMP = [ {a:0.018, b:0.009}, {a:0.022, b:0.011}, {a:0.032, b:0.016} ];
+  st.onde = {};
+  st.contrade.forEach(nc => {
+    st.onde[nc] = [];
+    for (let g = 0; g < st.totalGiri; g++) {
+      const k = AMP[Math.min(g, AMP.length - 1)];
+      st.onde[nc].push({ a: (Math.random()*2-1) * k.a, b: (Math.random()*2-1) * k.b });
+    }
+  });
+
+  function progressoDaTempo(st, nc, t) {
+    const cp = st.checkpoint[nc];
+    let prog;
+    if (t >= cp[cp.length - 1]) {
+      // Arrivato: si ferma al traguardo, con un micro-scarto che rispetta l'ordine d'arrivo ufficiale
+      const rank = st.classificaFinale.indexOf(nc);
+      return st.totalGiri + (st.contrade.length - (rank < 0 ? st.contrade.length : rank)) * 0.002;
+    }
+    else {
+      let g = 0;
+      while (g < cp.length - 2 && t >= cp[g + 1]) g++;
+      const hh = cp[g + 1] - cp[g];
+      const u = (t - cp[g]) / hh;
+      const m = st.pendenza[nc];
+      const u2 = u*u, u3 = u2*u;
+      const base = (2*u3 - 3*u2 + 1) * g + (u3 - 2*u2 + u) * hh * m[g]
+                 + (-2*u3 + 3*u2) * (g + 1) + (u3 - u2) * hh * m[g + 1];
+      const o = st.onde[nc][g];
+      const s2 = Math.sin(Math.PI * u); const env = s2 * s2;      // pendenza 0 a u=0 e u=1
+      prog = base + (o ? env * (o.a + o.b * Math.sin(2 * Math.PI * u)) : 0);
+    }
+    // piccolo scarto iniziale (ordine al canapo) che svanisce dolcemente nel primo mezzo giro
+    const i = st.contrade.indexOf(nc);
+    if (prog < 0.5) {                                          // scarto che svanisce con pendenza nulla agli estremi
+      const x = Math.max(0, prog) / 0.5;
+      prog -= i * 0.008 * (1 - x*x*(3 - 2*x));
+    }
+    return prog;
+  }
 
   function tick(ts) {
     if (!window._palioAnimState || window._palioAnimState.fase === 'fine') return;
@@ -4927,30 +5040,26 @@ window.avviaSimulazionePalio = function() {
     const dt = s.ultimoTS ? Math.min(ts - s.ultimoTS, 50) : 16; // ms elapsed, capped
     s.ultimoTS = ts;
 
-    // Velocità base: 1 giro completo in ~9 secondi per il cavallo medio
-    const velBase = 0.000095;
+    // Avanza il tempo simulato e ricava la posizione di ogni cavallo dai tempi ufficiali
+    s.tempoAnim += dt * s.msSimPerMsReale;
 
-    // Progresso leader attuale (per anti-doppiaggio)
-    const progressoLeader = s.contrade.reduce((max, nc) => Math.max(max, s.progresso[nc] || 0), 0);
-
+    // Posizioni "grezze" dai tempi ufficiali
+    const grezzo = {};
+    let progressoLeader = 0;
     s.contrade.forEach(nc => {
-      let vel = s.velocita[nc];
+      grezzo[nc] = progressoDaTempo(s, nc, s.tempoAnim);
+      if (grezzo[nc] > progressoLeader) progressoLeader = grezzo[nc];
+    });
 
-      // Anti-doppiaggio robusto: mantieni tutti entro un certo distacco dal leader.
-      // La correzione scatta PRIMA (soglia più bassa) ma con un boost più
-      // contenuto e graduale: così il recupero è più dolce e la logica dei
-      // sorpassi (aggiornaSorpassi) ha il tempo di scostare lateralmente il
-      // cavallo prima che raggiunga chi ha davanti, evitando sovrapposizioni.
-      // Il tetto massimo (1.8×) resta comunque ben sopra la velocità massima
-      // che un leader può avere (~1.66×), quindi il doppiaggio è sempre escluso.
-      const distacco = progressoLeader - (s.progresso[nc] || 0);
-      if (distacco > 0.30) {
-        const velMin = 1.2 + Math.min(0.6, (distacco - 0.30) * 1.5);
-        vel = Math.max(vel, velMin);
-      }
-
-      const step = velBase * vel * dt;
-      s.progresso[nc] = (s.progresso[nc] || 0) + step;
+    // ANTI-DOPPIAGGIO: il distacco dal leader viene compresso con una funzione monotona
+    // crescente con derivata <= 1 e asintoto 0,75 giri. Quindi: nessun cavallo può mai
+    // essere doppiato, nessuno torna indietro, e l'ordine relativo resta identico a
+    // quello dei tempi ufficiali (il risultato non viene toccato).
+    const SOGLIA = 0.30, MAX_EXTRA = 0.45;
+    s.contrade.forEach(nc => {
+      const d = progressoLeader - grezzo[nc];
+      const dEff = d <= SOGLIA ? d : SOGLIA + MAX_EXTRA * (1 - Math.exp(-(d - SOGLIA) / MAX_EXTRA));
+      s.progresso[nc] = progressoLeader - dEff;
     });
 
     // Giro corrente (per etichetta): basato sul leader
@@ -4958,14 +5067,13 @@ window.avviaSimulazionePalio = function() {
     const giroLeader = Math.floor(Math.max(0, s.progresso[leader]));
     if (giroLeader !== s.giroCorrente && giroLeader < s.totalGiri) {
       s.giroCorrente = giroLeader;
-      aggiornaVelocitaGiro(s, Math.min(giroLeader, s.classificaGiri.length-1));
       const stato = document.getElementById('STATO_CORSA');
       if (stato) stato.textContent = giroLeader === 1 ? 'Giro 2 — Il ritmo si fa serrato!' : 'ULTIMO GIRO! 🔥';
     }
 
     // Fine corsa: TUTTE le contrade devono completare i 3 giri (come nel Palio reale,
     // dove la corsa prosegue visivamente fino in fondo per tutti i cavalli)
-    const tuttiArrivati = s.contrade.every(nc => (s.progresso[nc] || 0) >= s.totalGiri);
+    const tuttiArrivati = s.tempoAnim >= s.tMax;
     if (tuttiArrivati) {
       s.fase = 'fine';
       // Allinea le posizioni finali esattamente alla classifica simulata
@@ -4974,6 +5082,7 @@ window.avviaSimulazionePalio = function() {
         s.progresso[nc] = s.totalGiri + (n-i)*0.002;
       });
       disegnaFramePalio();
+      aggiornaClassificaLive(s);
       mostraRisultatoFinale(s);
       return;
     }
