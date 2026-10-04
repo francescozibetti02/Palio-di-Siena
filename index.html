@@ -620,6 +620,10 @@ const COPPIE_FINALE = 4; // i primi classificati di ognuna delle 4 batterie
 
 /* ── Carriera Fantino: partecipazione alle corse in provincia ── */
 const COSTO_PARTECIPAZIONE_CORSA_FANTINO = 1000;
+/* Stalla: iscrizione dei cavalli alle corse in provincia (Carriera Fantino) */
+const COSTO_ISCRIZIONE_CAVALLO_CORSA = 1000;      // per ogni cavallo iscritto, anche se poi non viene estratto
+const PREMIO_CAVALLO_FINALE_PROVINCIA = 500;      // il cavallo (tuo) accede alla finale
+const PREMIO_CAVALLO_VITTORIA_PROVINCIA = 1500;   // il cavallo (tuo) vince la finale (si somma ai 500 della finale)
 const COSTO_ALLENAMENTO_CAVALLO = 2000;
 const STANCHEZZA_MAX_CAVALLO = 3;
 const MAX_CAVALLI_STALLA = 3; // numero massimo di cavalli posseduti contemporaneamente in stalla
@@ -642,7 +646,22 @@ function statoVivoCavallo(nome){
       nervosismo: base.nervosismo, stanchezza: 0
     };
   }
+  // Il colore del mantello non è una statistica allenabile: lo riallineo sempre al DB
+  // (così funziona anche con i salvataggi vecchi, creati prima di questa correzione)
+  S.statiCavalli[nome].colore = base.colore;
   return S.statiCavalli[nome];
+}
+/* Cavallo da usare al Palio (Carriera Fantino): se è un cavallo di proprietà del giocatore
+   ha SEMPRE le statistiche allenate della stalla, anche quando al Palio lo monta un altro
+   fantino per un'altra contrada. Altrimenti si usa il database. Ritorna una copia. */
+function cavalloPerPalioFantino(nomeCav){
+  if(!nomeCav) return null;
+  if(S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCav)){
+    const st = statoVivoCavallo(nomeCav);
+    if(st) return Object.assign({ nome: nomeCav }, st);
+  }
+  const c = (typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(x => x.nome === nomeCav) : null;
+  return c ? Object.assign({}, c) : null;
 }
 const PREMIO_BATTERIA_1 = 200;
 const PREMIO_BATTERIA_2 = 100;
@@ -2122,7 +2141,8 @@ function renderFasePalio(tipoPalio, faseIdx) {
         if (!S.alboDoro) S.alboDoro = [];
         const assegnazioniVittoriaCap = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
         const cavalloVincitoreCap = Object.keys(assegnazioniVittoriaCap).find(cav => assegnazioniVittoriaCap[cav] === S.contrada.nome) || null;
-        S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'capitano', fantino: nomeFantino, cavallo: cavalloVincitoreCap });
+        const esitoVittoriaCap = datiPalio.corsaSimulata && datiPalio.corsaSimulata.esiti ? datiPalio.corsaSimulata.esiti[S.contrada.nome] : null;
+        S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'capitano', fantino: nomeFantino, cavallo: cavalloVincitoreCap, scosso: !!(esitoVittoriaCap && esitoVittoriaCap.scosso) });
         S.log.push(`Vittoria al Palio di ${nomePalio} ${S.anno}! +1 vittoria, morale +50, prestigio +10, intesa fantino +10.`);
       } else {
         // sconfitta
@@ -2271,6 +2291,39 @@ const PREMI_ORO_PALIO = [5000,4000,3000,2000,1500,1000,750,500,250,0];
    Gli altri effetti (fama, intesa, statistiche) sono gestiti a parte in renderVincitorePalioFantino. */
 const PREMI_ORO_PALIO_FANTINO = [3000,2000,1000,0,0,0,0,0,0,0];
 
+/* ── Palio di disturbo (Carriera Capitano e Fantino) ──
+   Se al Palio partecipa una contrada nemica (rivalità storica, a senso unico per Torre/Onda/Oca: vedi contradeNemicheDi) di quella del giocatore e il suo cavallo è più scarso di quello
+   del giocatore (media di velocità, accelerazione, tenuta in curva e resistenza; nervosismo
+   escluso), quella contrada corre "contro la nemica": il cavallo del giocatore subisce un
+   malus casuale di -1 a una tra accelerazione, velocità, resistenza o tenuta in curva.
+   Il malus NON viene comunicato; al giocatore compare solo un avviso a fine corsa.
+   Modifica direttamente il cavallo (già clonato) della coppia del giocatore.
+   Ritorna l'elenco delle contrade che hanno fatto il palio di disturbo. */
+function mediaStatCavalloPalio(cav){
+  return ((cav.velocita||3) + (cav.accelerazione||3) + (cav.tenuta_curva||3) + (cav.resistenza||3)) / 4;
+}
+function contradeNemicheDi(nomeContrada){
+  /* Contrade che possono ostacolare nomeContrada. Regola a senso unico (è la stessa mappa
+     già usata per le rivalità dell'intesa, RAPPORTI_INTESA_FANTINO):
+     Torre è ostacolata da Oca e Onda; Oca è ostacolata dalla Torre; Onda NON è ostacolata
+     dalla Torre. Per tutte le altre le rivalità sono reciproche (es. Pantera <-> Aquila). */
+  const r = (typeof RAPPORTI_INTESA_FANTINO !== 'undefined') ? RAPPORTI_INTESA_FANTINO[nomeContrada] : null;
+  return r ? r.rivali.slice() : ((RAPPORTI_CONTRADE[nomeContrada] || {}).rivali || []).slice();
+}
+function applicaPaloDiDisturbo(coppie){
+  const me = coppie.find(c => c.isMe);
+  if (!me) return [];
+  const nemiche = contradeNemicheDi(me.nomeContrada);
+  const mediaMia = mediaStatCavalloPalio(me.cavallo);   // confronto sulle statistiche prima dei malus
+  const attive = coppie.filter(c => !c.isMe && nemiche.includes(c.nomeContrada) && mediaStatCavalloPalio(c.cavallo) < mediaMia);
+  const stat = ['accelerazione','velocita','resistenza','tenuta_curva'];
+  attive.forEach(() => {
+    const k = stat[Math.floor(Math.random() * stat.length)];
+    me.cavallo[k] = Math.max(1, (me.cavallo[k] || 3) - 1);
+  });
+  return attive.map(c => c.nomeContrada);
+}
+
 /* Prepara la simulazione del Palio: assegna cavallo e fantino a ogni contrada partecipante,
    poi simula giro per giro con il motore esistente (simulaCorsaCoppia modificato per 1 giro). */
 function preparaCorsaPalio(tipoPalio) {
@@ -2357,20 +2410,26 @@ function preparaCorsaPalio(tipoPalio) {
     return { nomeContrada, cavallo: cav, fantino: fan, isMe };
   });
 
+  // Palio di disturbo delle contrade nemiche (malus nascosto al giocatore)
+  const paloDisturbo = applicaPaloDiDisturbo(coppie);
+
   /* Simula giro per giro usando simulaCorsaCoppia con NUM_GIRI_CORSA=1 per giro.
      Usiamo la funzione esistente con un wrapper che sovrascrive NUM_GIRI_CORSA temporaneamente. */
   const tempiGiri = coppie.map(cp => {
     // Simula 3 giri separati per costruire una classifica progressiva
     const giri = [];
     let tempoCumulativo = 0;
+    const statoScosso = { scosso:false };   // scosso = cavallo senza fantino: lo resta fino al traguardo
+    let esitoCaduto = false;
     for (let g = 0; g < NUM_GIRI_PALIO; g++) {
       // Override temporaneo del numero di giri
       const origGiri = NUM_GIRI_CORSA;
       // Simuliamo giro singolo chiamando direttamente la logica interna
-      const res = simulaGiroSingoloPalio(cp.cavallo, cp.fantino, PISTA_CAMPO, g, tempoCumulativo);
+      const res = simulaGiroSingoloPalio(cp.cavallo, cp.fantino, PISTA_CAMPO, g, tempoCumulativo, 1, statoScosso);
       tempoCumulativo += res.tempo;
       giri.push({ tempo: res.tempo, cumulativo: tempoCumulativo, caduta: res.caduta });
       if (res.caduta) {
+        esitoCaduto = true;
         // aggiunge penalità per i giri rimanenti
         for (let gg = g + 1; gg < NUM_GIRI_PALIO; gg++) {
           tempoCumulativo += 800 + Math.random() * 200;
@@ -2379,7 +2438,7 @@ function preparaCorsaPalio(tipoPalio) {
         break;
       }
     }
-    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo };
+    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, caduto: esitoCaduto };
   });
 
   /* Classifica finale per tempo cumulativo */
@@ -2399,8 +2458,10 @@ function preparaCorsaPalio(tipoPalio) {
     coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
+    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto }])),   // scosso / caduto per contrada
     giroMostrato: 0,   // quanti giri ha già visto il giocatore (0 = nessuno)
-    conclusa: false
+    conclusa: false,
+    paloDisturbo       // contrade nemiche che hanno fatto il palio di disturbo (solo il nome è mostrato)
   };
 
   datiPalio.corsaSimulata = corsaSimulata;
@@ -2436,14 +2497,8 @@ function preparaCorsaPalioFantino(tipoPalio) {
 
   const trovaCavallo = (nomeContrada) => {
     const nomeCav = contradaCavallo[nomeContrada];
-    if (nomeCav && nomeContrada === contradaGiocatore && S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCav)) {
-      const st = statoVivoCavallo(nomeCav);
-      if (st) return Object.assign({ nome: nomeCav }, st);
-    }
-    if (nomeCav && typeof CAVALLI_DB !== 'undefined') {
-      const c = CAVALLI_DB.find(x => x.nome === nomeCav);
-      if (c) return c;
-    }
+    const cEff = cavalloPerPalioFantino(nomeCav);
+    if (cEff) return cEff;
     if (typeof CAVALLI_DB !== 'undefined' && CAVALLI_DB.length) {
       return CAVALLI_DB[Math.floor(Math.random() * CAVALLI_DB.length)];
     }
@@ -2503,14 +2558,20 @@ function preparaCorsaPalioFantino(tipoPalio) {
     return { nomeContrada, cavallo: cav, fantino: fan, isMe };
   });
 
+  // Palio di disturbo delle contrade nemiche (malus nascosto al giocatore)
+  const paloDisturbo = applicaPaloDiDisturbo(coppie);
+
   const tempiGiri = coppie.map(cp => {
     const giri = [];
     let tempoCumulativo = 0;
+    const statoScosso = { scosso:false };   // scosso = cavallo senza fantino: lo resta fino al traguardo
+    let esitoCaduto = false;
     for (let g = 0; g < NUM_GIRI_PALIO; g++) {
-      const res = simulaGiroSingoloPalio(cp.cavallo, cp.fantino, PISTA_CAMPO, g, tempoCumulativo, cp.isMe ? bonusMossa : 1);
+      const res = simulaGiroSingoloPalio(cp.cavallo, cp.fantino, PISTA_CAMPO, g, tempoCumulativo, cp.isMe ? bonusMossa : 1, statoScosso);
       tempoCumulativo += res.tempo;
       giri.push({ tempo: res.tempo, cumulativo: tempoCumulativo, caduta: res.caduta });
       if (res.caduta) {
+        esitoCaduto = true;
         for (let gg = g + 1; gg < NUM_GIRI_PALIO; gg++) {
           tempoCumulativo += 800 + Math.random() * 200;
           giri.push({ tempo: 800, cumulativo: tempoCumulativo, caduta: false });
@@ -2518,7 +2579,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
         break;
       }
     }
-    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo };
+    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, caduto: esitoCaduto };
   });
 
   const classifica = tempiGiri.slice().sort((a, b) => a.tempoCumulativo - b.tempoCumulativo);
@@ -2537,8 +2598,10 @@ function preparaCorsaPalioFantino(tipoPalio) {
     coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
+    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto }])),   // scosso / caduto per contrada
     giroMostrato: 0,
-    conclusa: false
+    conclusa: false,
+    paloDisturbo
   };
 
   datiPalio.corsaSimulataFantino = corsaSimulata;
@@ -2552,13 +2615,16 @@ function preparaCorsaPalioFantino(tipoPalio) {
    È una versione ridotta di simulaCorsaCoppia che fa girare il loop solo 1 volta.
    bonusVelocitaMossa: moltiplicatore opzionale dal minigioco della Mossa (1 = nessun effetto,
    usato dalla Carriera Fantino; la Carriera Capitano non lo passa mai, quindi resta 1). */
-function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPrecedente, bonusVelocitaMossa) {
+function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPrecedente, bonusVelocitaMossa, statoScosso) {
   bonusVelocitaMossa = bonusVelocitaMossa || 1;
-  const nervEff = nervosismoEffettivo(cavallo, fantino);
-  const resistenzaEff = Math.max(0.5, cavallo.resistenza - (nervEff-1)*0.3);
-  const velocitaMax = (cavallo.velocita + fantino.bravura*0.15) * bonusVelocitaMossa;
-  const accelerazione = cavallo.accelerazione + fantino.gestione_mossa*0.3;
-  const tenutaCurvaEff = cavallo.tenuta_curva + fantino.esperienza*0.2;
+  /* statoScosso: oggetto {scosso:bool} che il chiamante conserva tra un giro e l'altro della
+     stessa coppia: se il fantino è caduto in un giro precedente, il cavallo corre senza fantino
+     anche in questo. Se non viene passato, lo stato vale solo per questo giro. */
+  statoScosso = statoScosso || { scosso:false };
+  const rischioScossoUnita = rischioScossoPerUnita(cavallo, fantino);
+  let scosso = !!statoScosso.scosso;
+  let { resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, scosso);
+  const tenutaPerCaduta = cavallo.tenuta_curva + fantino.esperienza*0.2;   // la caduta dipende solo da cavallo+fantino in sella
 
   const segmentiGiro = pista.segmento;
   const lunghezzaGiro = segmentiGiro.reduce((tot,s)=>tot+s.lunghezza,0);
@@ -2576,9 +2642,15 @@ function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPreced
     while(distSeg < seg.lunghezza && iterazioniMax-->0){
       let vTarget;
       if(seg.tipo === 'curva'){
+        // Scosso: il fantino cade in curva (cavallo nervoso + fantino poco esperto), il cavallo prosegue da solo
+        if(!scosso && rischioScossoUnita > 0 && Math.random() < rischioScossoUnita * Math.max(1, velocitaAttuale*passo)){
+          scosso = true;
+          statoScosso.scosso = true;
+          ({ resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, true));
+        }
         const fattoreCurva = Math.min(1.0, 0.45 + tenutaCurvaEff*0.09) / seg.severita;
         vTarget = velocitaMax * fattoreCurva;
-        const rischioCaduta = Math.max(0, (seg.severita*1.3 - tenutaCurvaEff) * 0.012);
+        const rischioCaduta = Math.max(0, (seg.severita*1.3 - tenutaPerCaduta) * 0.012);
         // Chiocciola: rischio caduta dimezzato per il fantino del giocatore
         const fattoreCaduta = (S && S.contrada?.bonusKey === 'stabilita') ? 0.5 : 1.0;
         if(Math.random() < rischioCaduta * fattoreCaduta){ caduta = true; break; }
@@ -2602,7 +2674,7 @@ function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPreced
   }
   if(caduta) tempo += 500 + Math.random()*300;
   tempo *= (0.97 + Math.random()*0.06);
-  return { tempo, caduta };
+  return { tempo, caduta, scosso };
 }
 
 /* ═══════════════════════════════════════════════
@@ -3309,8 +3381,10 @@ function renderCorsaPalio(tipoPalio) {
   const corsaJSON = JSON.stringify({
     classificaGiri: corsa.classificaGiri,
     classificaFinale: corsa.classificaFinale,
+    esiti: corsa.esiti || {},
     coloriCavalli: Object.fromEntries((corsa.coppie || []).map(cp => [cp.nomeContrada, cp.coloreCavallo])),
     nomeGiocatore: S.contrada.nome,
+    paloDisturbo: corsa.paloDisturbo || [],
     tipoPalio,
     modalita: 'capitano'
   }).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
@@ -3380,8 +3454,10 @@ function renderCorsaPalioFantino(tipoPalio) {
   const corsaJSON = JSON.stringify({
     classificaGiri: corsa.classificaGiri,
     classificaFinale: corsa.classificaFinale,
+    esiti: corsa.esiti || {},
     coloriCavalli: Object.fromEntries((corsa.coppie || []).map(cp => [cp.nomeContrada, cp.coloreCavallo])),
     nomeGiocatore: datiPalio.contradaFantino,
+    paloDisturbo: corsa.paloDisturbo || [],
     tipoPalio,
     modalita: 'fantino'
   }).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
@@ -4956,10 +5032,40 @@ window.avviaSimulazionePalio = function() {
   const EXTRA_MAX = 0.04;    // extra massimo legato al distacco reale
   st.checkpoint = {};
   st.contrade.forEach(nc => { st.checkpoint[nc] = [0]; });
+
+  /* VINCITORE "COPERTO" (solo effetto visivo, non tocca la simulazione né l'ordine d'arrivo).
+     Il vincitore ufficiale di solito è anche il più veloce fin dal primo giro e scappava in
+     testa togliendo suspense. Qui, SOLO per i checkpoint di fine giro 1 e fine giro 2, lo
+     "ritardiamo" visivamente: a fine giro 1 sta a metà gruppo, a fine giro 2 in 2ª-3ª
+     posizione; poi nell'ultimo giro rimonta e passa in testa attorno a metà dell'ultimo giro.
+     L'ultimo checkpoint (fine giro 3) NON viene toccato: è quello che decide chi taglia per
+     primo il traguardo e l'ordine d'arrivo, quindi l'animazione resta identica ai risultati
+     scritti. Se il vincitore è già naturalmente più indietro del bersaglio, non si tocca.
+     Il distacco visivo del vincitore spostato è costruito con la stessa formula degli altri
+     (rank + distacco del cavallo che prende il suo posto), quindi resta strettamente
+     crescente con la posizione e nessun cavallo torna mai indietro. */
+  const vincitoreUfficiale = st.classificaFinale && st.classificaFinale[0];
+  const copriVincitore = nCon >= 4 && st.totalGiri >= 3 && st.contrade.includes(vincitoreUfficiale);
+  const rankBersaglio = [
+    Math.floor(nCon * 0.3) + Math.floor(Math.random() * (Math.floor(nCon * 0.6) - Math.floor(nCon * 0.3) + 1)),  // fine giro 1: metà gruppo
+    1 + Math.floor(Math.random() * 2)                                                                             // fine giro 2: 2ª-3ª posizione
+  ].map(r => Math.min(nCon - 1, r));
   for (let g = 0; g < st.totalGiri; g++) {
     const ord = st.contrade.slice().sort((x, y) => rawCum[x][g] - rawCum[y][g]);
-    ord.forEach((nc, rank) => {
-      const dLap = (rawCum[nc][g] - minG[g]) / lapRef[g];
+    const dLapDi = nc => (rawCum[nc][g] - minG[g]) / lapRef[g];
+    let ordVis = ord;
+    let dLapVincitore = null;   // distacco "preso in prestito" per il vincitore spostato
+    if (copriVincitore && g < st.totalGiri - 1) {
+      const naturale = ord.indexOf(vincitoreUfficiale);
+      const bersaglio = rankBersaglio[g];
+      if (naturale < bersaglio) {
+        dLapVincitore = dLapDi(ord[bersaglio]);
+        ordVis = ord.filter(nc => nc !== vincitoreUfficiale);
+        ordVis.splice(bersaglio, 0, vincitoreUfficiale);
+      }
+    }
+    ordVis.forEach((nc, rank) => {
+      const dLap = (nc === vincitoreUfficiale && dLapVincitore !== null) ? dLapVincitore : dLapDi(nc);
       const gap = PASSO_POS * rank + EXTRA_MAX * (1 - Math.exp(-dLap / 0.15));
       const prevV = st.checkpoint[nc][g];
       st.checkpoint[nc].push(Math.max(minG[g] + gap * lapRef[g], prevV + 1e-6));
@@ -5193,6 +5299,8 @@ function mostraRisultatoFinale(st) {
     const testoAccoppiata = (acc.cavallo || acc.fantino || acc.isTu)
       ? `<span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.45)"> — 🐎 ${acc.cavallo || 'Cavallo'} · 🏇 ${acc.isTu ? '<strong style="color:var(--verde)">tu</strong>' : (acc.fantino || 'Fantino')}</span>`
       : '';
+    const esitoPalio = (corsa.esiti && corsa.esiti[nc]) || null;
+    const etichettaEsito = esitoPalio ? htmlEsitoCorsa(esitoPalio, 'font-size:10px;font-weight:700;margin-left:6px;') : '';
     const premio = tabellaPremi[idx] || 0;
     const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':`${idx+1}°`;
     const id = 'rf_'+nc.replace(/\s/g,'_');
@@ -5200,7 +5308,7 @@ function mostraRisultatoFinale(st) {
       <span style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.45);width:24px">${medal}</span>
       <canvas id="${id}" width="18" height="18" style="border-radius:50%;flex-shrink:0"></canvas>
       <div style="flex:1;min-width:0">
-        <span style="font-family:var(--fn);font-size:12px;font-weight:${isMe?'700':'400'};color:${isMe?'var(--ocra)':'var(--ocra-l)'}">${nc}${isMe?' (tu)':''}</span>${testoAccoppiata}
+        <span style="font-family:var(--fn);font-size:12px;font-weight:${isMe?'700':'400'};color:${isMe?'var(--ocra)':'var(--ocra-l)'}">${nc}${isMe?' (tu)':''}</span>${testoAccoppiata}${etichettaEsito}
       </div>
       ${premio>0?`<span style="font-family:var(--fn);font-size:10px;color:var(--verde);font-weight:700">+${premio}💰</span>`:''}
     </div>`;
@@ -5229,6 +5337,7 @@ function mostraRisultatoFinale(st) {
     <div class="card" style="margin-bottom:10px;border:2px solid ${haiVinto?'var(--ocra)':'rgba(200,153,30,.3)'};${haiVinto?'box-shadow:0 0 20px rgba(200,153,30,.18)':''}">
       <div class="card-title">🏁 Classifica Finale</div>
       ${righeFinali}
+      ${(corsa.paloDisturbo || []).map(nc => `<div style="font-family:var(--fn);font-size:11px;color:var(--ross);font-style:italic;margin-top:10px;text-align:center">La contrada "${nc}" ha deciso di fare un palio contro la nemica!</div>`).join('')}
     </div>
     <div class="card" style="text-align:center;padding:14px;background:${haiVinto?'linear-gradient(160deg,#2C1A0C,#1A0A04)':'linear-gradient(160deg,#2C1208,#1A0A04)'};border:${haiVinto?'2px solid rgba(200,153,30,.6)':'1px solid rgba(200,153,30,.2)'}">
       <div style="font-size:${haiVinto?'36':'28'}px;margin-bottom:6px">${haiVinto?'🏆':'🏇'}</div>
@@ -5288,6 +5397,10 @@ function preparaTrattaPalio(tipoPalio) {
     }
     cavalliAmmessi = copia.slice(0, Math.min(12, copia.length));
   }
+
+  /* 2b. Carriera Fantino: i cavalli di proprietà del giocatore partecipano alla Tratta
+         con le statistiche allenate della stalla (non con quelle base del database) */
+  cavalliAmmessi = cavalliAmmessi.map(c => cavalloPerPalioFantino(c.nome) || c);
 
   /* 3. Dividi in gruppi da 5-6 (preferendo gruppi più grandi) */
   const nCavalli = cavalliAmmessi.length;
@@ -5401,7 +5514,7 @@ function renderTrattaPalio(tipoPalio) {
           <div style="flex:1">
             <span style="font-family:var(--fn);font-size:12px;font-weight:${i===0?'700':'400'};color:${i===0?'var(--ocra-l)':'var(--perg2)'}">🐎 ${r.cavallo.nome}</span>
             <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.4)"> — 🏇 ${r.fantino.nome}</span>
-            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+            ${htmlEsitoCorsa(r, 'font-family:var(--fn);font-size:10px;margin-left:4px;')}
           </div>
         </div>`).join('');
     }
@@ -5519,7 +5632,7 @@ function renderSceltaCavalliPalio(tipoPalio) {
         entry = { cavallo: r.cavallo, risultatiTratta: [], score: S.scoreCavalliAnno?.[r.cavallo.nome] || null };
         cavalliTratta.push(entry);
       }
-      entry.risultatiTratta.push({ gara: gIdx + 1, pos: posIdx + 1, caduta: r.caduta });
+      entry.risultatiTratta.push({ gara: gIdx + 1, pos: posIdx + 1, caduta: r.caduta, scosso: r.scosso });
     });
   });
 
@@ -5542,8 +5655,8 @@ function renderSceltaCavalliPalio(tipoPalio) {
 
     // Risultati Tratta
     const righeTratta = entry.risultatiTratta.map(r => `
-      <span style="font-family:var(--fn);font-size:11px;color:${r.pos===1?'var(--ocra)':r.caduta?'var(--ross)':'rgba(200,153,30,.5)'};margin-right:6px">
-        Gara ${r.gara}: <strong>${r.pos}°</strong>${r.caduta?' 💥':''}
+      <span style="font-family:var(--fn);font-size:11px;color:${r.pos===1?'var(--ocra)':r.caduta?'var(--ross)':r.scosso?'var(--ocra-l)':'rgba(200,153,30,.5)'};margin-right:6px">
+        Gara ${r.gara}: <strong>${r.pos}°</strong>${r.caduta?' 💥 caduto':r.scosso?' 🐴 scosso':''}
       </span>`).join('');
 
     // Statistiche province (solo se non modalità segreta)
@@ -6520,7 +6633,7 @@ function evitaSweepTotaleProve(risultato, gareGiaFatte, numeroProveTotali) {
 function simulaProvaPalio(coppie, pista) {
   const risultati = coppie.map(c => {
     const r = simulaCorsaCoppia(c.cavallo, c.fantino, pista, c.bonusVelocitaMossa);
-    return { nomeContrada: c.nomeContrada, cavallo: c.cavallo, fantino: c.fantino, tempo: r.tempo, caduta: r.caduta, isMe: !!c.isMe };
+    return { nomeContrada: c.nomeContrada, cavallo: c.cavallo, fantino: c.fantino, tempo: r.tempo, caduta: r.caduta, scosso: r.scosso, isMe: !!c.isMe };
   });
   return applicaGiocoCopertoProve(risultati, coppie);
 }
@@ -6626,7 +6739,7 @@ function renderProvePalio(tipoPalio) {
           <div style="flex:1">
             <span style="font-family:var(--fn);font-size:12px;font-weight:${r.isMe?'700':'400'};color:${r.isMe?'var(--ocra)':'var(--perg2)'}">${r.nomeContrada}${r.isMe?' (tu)':''}</span>
             <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.45)"> — 🐎 ${r.cavallo.nome} · 🏇 ${r.fantino.nome}</span>
-            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+            ${htmlEsitoCorsa(r, 'font-family:var(--fn);font-size:10px;margin-left:4px;')}
           </div>
         </div>`).join('');
     } else if (eProssima) {
@@ -8727,19 +8840,70 @@ function nervosismoEffettivo(cavallo, fantino){
   return Math.max(1, cavallo.nervosismo - (fantino.empatia-1)*0.4);
 }
 
+/* ── SCOSSO e CADUTO: due eventi diversi ──
+   • CADUTO: il cavallo cade a causa della bassa tenuta in curva (rischio per step in curva,
+     come prima). Esce di fatto dalla corsa e arriva tra gli ultimi (penalità di tempo).
+   • SCOSSO: il fantino cade ma il cavallo continua da solo. Può capitare solo a un cavallo
+     nervoso (nervosismo 4 o 5, da database o per effetti come la vicinanza alla nemica al
+     canapo) montato da un fantino poco esperto (esperienza 1 o 2). Non è una squalifica:
+     da lì in poi il cavallo corre senza gli aiuti del fantino (bravura, gestione mossa,
+     esperienza e calma dell'empatia vengono a mancare) e con una lieve perdita di velocità,
+     ma se è molto forte può comunque andare bene o addirittura vincere il Palio. */
+const SCOSSO_NERVOSISMO_MIN = 4;
+const SCOSSO_ESPERIENZA_MAX = 2;
+const RISCHIO_SCOSSO_PER_UNITA = 0.00166;  // rischio per unità di curva percorsa (base: nervosismo 4, esperienza 2)
+const FATTORE_VELOCITA_SCOSSO = 0.97;      // piccola perdita di velocità di punta senza il fantino in sella
+const FANTINO_SCOSSO = { bravura:0, esperienza:0, gestione_mossa:0, empatia:1 };  // nessun aiuto dal fantino
+
+function puoEssereScosso(cavallo, fantino){
+  if(!cavallo || !fantino) return false;
+  return (cavallo.nervosismo || 0) >= SCOSSO_NERVOSISMO_MIN
+      && fantino.esperienza !== undefined && fantino.esperienza <= SCOSSO_ESPERIENZA_MAX;
+}
+function rischioScossoPerUnita(cavallo, fantino){
+  if(!puoEssereScosso(cavallo, fantino)) return 0;
+  const fattoreNerv = 1 + (Math.min(6, cavallo.nervosismo) - SCOSSO_NERVOSISMO_MIN) * 0.5;  // 4 → ×1, 5 → ×1,5
+  const fattoreEsp  = fantino.esperienza <= 1 ? 1.3 : 1;                                   // esperienza 1 → +30%
+  return RISCHIO_SCOSSO_PER_UNITA * fattoreNerv * fattoreEsp;
+}
+/* Parametri di corsa del cavallo, con o senza il fantino in sella */
+function parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, scosso){
+  const fan = scosso ? FANTINO_SCOSSO : fantino;
+  const nervEff = nervosismoEffettivo(cavallo, fan);
+  return {
+    // Il nervosismo alto abbassa la resistenza effettiva del cavallo
+    resistenzaEff: Math.max(0.5, cavallo.resistenza - (nervEff-1)*0.3),
+    // La bravura del fantino aiuta lievemente la velocità di punta
+    velocitaMax: (cavallo.velocita + fan.bravura*0.15) * bonusVelocitaMossa * (scosso ? FATTORE_VELOCITA_SCOSSO : 1),
+    // La gestione mossa del fantino aiuta l'accelerazione
+    accelerazione: cavallo.accelerazione + fan.gestione_mossa*0.3,
+    // L'esperienza del fantino aiuta a tenere una velocità maggiore in curva
+    tenutaCurvaEff: cavallo.tenuta_curva + fan.esperienza*0.2
+  };
+}
+/* Etichetta testuale dell'esito di un cavallo in una corsa: caduto, scosso o niente.
+   Se il cavallo è scosso E poi cade, vale "caduto". */
+function testoEsitoCorsa(r){
+  if(r && r.caduta) return ' (caduto)';
+  if(r && r.scosso) return ' (scosso)';
+  return '';
+}
+function htmlEsitoCorsa(r, stile){
+  const t = testoEsitoCorsa(r);
+  if(!t) return '';
+  const colore = (r.caduta ? 'var(--ross)' : 'var(--ocra)');
+  return `<span style="${stile || ''}color:${colore}">${t.trim()}</span>`;
+}
+
 /* Simula una singola corsa (un giro completo della pista per NUM_GIRI_CORSA volte) per una coppia cavallo+fantino.
    Ritorna il tempo totale impiegato (valori più bassi = più veloce) e un eventuale evento di caduta. */
 function simulaCorsaCoppia(cavallo, fantino, pista, bonusVelocitaMossa){
   bonusVelocitaMossa = bonusVelocitaMossa || 1; // moltiplicatore da minigioco mossa (1 = nessun effetto, usato dal Capitano)
-  const nervEff = nervosismoEffettivo(cavallo, fantino);
-  // Il nervosismo alto abbassa la resistenza effettiva del cavallo
-  const resistenzaEff = Math.max(0.5, cavallo.resistenza - (nervEff-1)*0.3);
-  // La bravura del fantino aiuta lievemente la velocità di punta (sorpassi più efficaci)
-  const velocitaMax = (cavallo.velocita + fantino.bravura*0.15) * bonusVelocitaMossa;
-  // La gestione mossa del fantino aiuta l'accelerazione, soprattutto in partenza
-  const accelerazione = cavallo.accelerazione + fantino.gestione_mossa*0.3;
-  // L'esperienza del fantino aiuta a tenere una velocità maggiore in curva
-  const tenutaCurvaEff = cavallo.tenuta_curva + fantino.esperienza*0.2;
+  // Parametri con il fantino in sella; se il cavallo resta scosso in curva vengono ricalcolati senza fantino
+  const rischioScossoUnita = rischioScossoPerUnita(cavallo, fantino);
+  let scosso = false;
+  let { resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, false);
+  const tenutaPerCaduta = cavallo.tenuta_curva + fantino.esperienza*0.2;   // la caduta dipende solo da cavallo+fantino in sella
 
   const segmentiGiro = pista.segmento;
   const lunghezzaGiro = segmentiGiro.reduce((tot,s)=>tot+s.lunghezza,0);
@@ -8758,11 +8922,16 @@ function simulaCorsaCoppia(cavallo, fantino, pista, bonusVelocitaMossa){
       while(distSeg < seg.lunghezza && iterazioniMax-->0){
         let vTarget;
         if(seg.tipo === 'curva'){
+          // Scosso: il fantino cade in curva (cavallo nervoso + fantino poco esperto), il cavallo prosegue da solo
+          if(!scosso && rischioScossoUnita > 0 && Math.random() < rischioScossoUnita * Math.max(1, velocitaAttuale*passo)){
+            scosso = true;
+            ({ resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, true));
+          }
           // Tenuta curva alta avvicina la velocità in curva a quella massima; bassa tenuta penalizza molto
           const fattoreCurva = Math.min(1.0, 0.45 + tenutaCurvaEff*0.09) / seg.severita;
           vTarget = velocitaMax * fattoreCurva;
           // Rischio di caduta: tenuta curva molto bassa rispetto alla severità della curva
-          const rischioCaduta = Math.max(0, (seg.severita*1.3 - tenutaCurvaEff) * 0.012);
+          const rischioCaduta = Math.max(0, (seg.severita*1.3 - tenutaPerCaduta) * 0.012);
           if(Math.random() < rischioCaduta){ caduta = true; break; }
         } else {
           vTarget = velocitaMax;
@@ -8788,12 +8957,12 @@ function simulaCorsaCoppia(cavallo, fantino, pista, bonusVelocitaMossa){
     }
   }
   if(caduta){
-    // Una caduta penalizza pesantemente il tempo finale (il cavallo scosso finisce ultimo o quasi)
+    // Una caduta penalizza pesantemente il tempo finale (il cavallo caduto finisce tra gli ultimi)
     tempo += 600 + Math.random()*400;
   }
   // Piccola variabilità random per evitare risultati sempre identici a parità di statistiche
   tempo *= (0.97 + Math.random()*0.06);
-  return { tempo, caduta };
+  return { tempo, caduta, scosso };
 }
 
 /* Simula una batteria/finale: array di coppie {cavallo, fantino} -> ritorna classifica ordinata
@@ -8803,7 +8972,7 @@ function simulaCorsaCoppia(cavallo, fantino, pista, bonusVelocitaMossa){
 function simulaGara(coppie, pista){
   const risultati = coppie.map(c=>{
     const r = simulaCorsaCoppia(c.cavallo, c.fantino, pista, c.bonusVelocitaMossa);
-    return { cavallo:c.cavallo, fantino:c.fantino, tempo:r.tempo, caduta:r.caduta, giocatore:!!c.giocatore };
+    return { cavallo:c.cavallo, fantino:c.fantino, tempo:r.tempo, caduta:r.caduta, scosso:r.scosso, giocatore:!!c.giocatore };
   });
   risultati.sort((a,b)=>a.tempo-b.tempo);
   return risultati;
@@ -8988,7 +9157,7 @@ function renderSchermataCorse(){
         ${b.coppie.map(c=>renderCoppiaRiga(c, giaFatta)).join('')}
         ${giaFatta ? `
           <div style="margin-top:10px;font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5)">Ordine d'arrivo:</div>
-          ${b.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+          ${b.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
         ` : (eProssima ? `<button class="btn gold w" onclick="disputaBatteria(${idx})">🏁 Disputa la Batteria ${b.numero}</button>` : `<div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.3);margin-top:8px;font-style:italic">In attesa delle batterie precedenti…</div>`)}
       </div>`;
     });
@@ -9007,7 +9176,7 @@ function renderSchermataCorse(){
       ${corsa.finale.coppie.map(c=>renderCoppiaRiga(c, !!corsa.finale.completata)).join('')}
       ${corsa.finale.completata ? `
         <div style="margin-top:10px;font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5)">Ordine d'arrivo:</div>
-        ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+        ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
         <button class="btn gold w" onclick="concludiCorseProvincia()">Continua →</button>
       ` : `<button class="btn gold w" onclick="disputaFinale()">🏆 Disputa la Finale</button>`}
     </div>`;
@@ -9015,7 +9184,7 @@ function renderSchermataCorse(){
   } else if(corsa.faseAttuale === 'conclusa'){
     corpoHtml += `<div class="card">
       <div class="card-title">🏆 Risultato della Finale</div>
-      ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:13px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:3px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+      ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:13px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:3px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
       <div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.35);margin-top:10px;font-style:italic">La corsa di questo mese si è conclusa. Una nuova corsa sarà disponibile il mese prossimo.</div>
       <button class="btn w" onclick="renderCorseProvincia()">← Torna alle Corse</button>
     </div>`;
@@ -9364,7 +9533,7 @@ function renderAlboDoro(){
   const vittorie = (S.alboDoro || []).slice().reverse();
 
   const righeVittorie = vittorie.map(v => {
-    const cavallo = v.cavallo || '?';
+    const cavallo = (v.cavallo || '?') + (v.scosso ? ' (scosso)' : '');
     const chiSottotitolo = eFantino
       ? `Contrada ${v.contrada || '?'}`
       : (v.fantino || '?');
@@ -9580,6 +9749,7 @@ function iniziaCarreraFantinoNuovo(){
     intesaContrade: intesaContradeIniziale,
     fantiniStats: inizializzaFantiniStats(),
     incontriContradeMese: 0,
+    accordiContradeMese: 0,
     corsaProvinciaMese: null,
     corseProvinciaAnnullateMese: false,
     infortunatoMese: false,
@@ -9589,6 +9759,7 @@ function iniziaCarreraFantinoNuovo(){
     palioVintiCavalli: {},
     allenamentoMeseCavalli: {},
     cavalliEsclusiLotto: [],
+    cavalliIscrittiMese: null,
     lottoDecisoMese: false,
     cavalliPosseduti: [],
     corsaProvinciaPartecipazioneMese: false,
@@ -9777,6 +9948,7 @@ function iniziaCarreraFantinoEsistente(idx){
     intesaContrade: intesaContradeIniziale,
     fantiniStats: inizializzaFantiniStats(),
     incontriContradeMese: 0,
+    accordiContradeMese: 0,
     corsaProvinciaMese: null,
     corseProvinciaAnnullateMese: false,
     infortunatoMese: false,
@@ -9786,6 +9958,7 @@ function iniziaCarreraFantinoEsistente(idx){
     palioVintiCavalli: {},
     allenamentoMeseCavalli: {},
     cavalliEsclusiLotto: [],
+    cavalliIscrittiMese: null,
     lottoDecisoMese: false,
     cavalliPosseduti: [],
     corsaProvinciaPartecipazioneMese: false,
@@ -9983,6 +10156,7 @@ function eseguiAvanzamentoMeseFantinoEffettivo(){
   S.infortunatoMese = false;
   // Il minigioco "Incontro" con una contrada si può fare al massimo 1 volta al mese
   S.incontriContradeMese = 0;
+  S.accordiContradeMese = 0;
   // L'azione "Amicizia" con i fantini rivali si può fare al massimo 3 volte al mese
   S.amiciziaFantiniMese = 0;
   // La partecipazione del giocatore alla corsa in provincia è possibile una volta al mese
@@ -9995,6 +10169,7 @@ function eseguiAvanzamentoMeseFantinoEffettivo(){
   S.allenamentoMeseCavalli = {};
   S.lottoDecisoMese = false;
   S.cavalliEsclusiLotto = [];
+  S.cavalliIscrittiMese = null;
   if(nuovoAnno){
     // I risultati delle corse in provincia dei cavalli posseduti si azzerano a fine anno
     S.scoreCavalliFantino = {};
@@ -10194,14 +10369,16 @@ function generaImprevistoMensileFantino(){
    RAPPORTI CON LE CONTRADE (carriera Fantino)
    17 contrade, ognuna con un'intesa 0–100 (iniziale casuale).
    Azioni: "Incontra" (minigioco Forza 4, gratis, max 1 al mese, ±15 intesa)
-           "Accordo" (300 oro, +10 intesa, sempre disponibile)
+           "Accordo" (1500 oro, +1/+15 intesa casuale, max 3 al mese in totale)
    Se la contrada partecipa al Palio dell'anno in corso (Luglio o Agosto,
    dopo l'estrazione) compare l'etichetta "Partecipa al Palio", che sparisce
    non appena quel Palio è concluso (palioLuglioAnno/palioAgostoAnno → null
    al cambio d'anno).
 ═══════════════════════════════════════════════ */
 const COSTO_ACCORDO_FANTINO = 1500;
-const BONUS_ACCORDO_FANTINO = 10;
+const BONUS_ACCORDO_FANTINO_MIN = 1;    // l'accordo dà un bonus di intesa casuale tra MIN e MAX
+const BONUS_ACCORDO_FANTINO_MAX = 15;
+const MAX_ACCORDI_MESE_FANTINO = 3;     // limite mensile complessivo, su tutte le contrade
 const BONUS_INCONTRO_VITTORIA = 15;
 const MALUS_INCONTRO_SCONFITTA = 15;
 const SOGLIA_RIVALITA_INTESA = 85;
@@ -10282,7 +10459,9 @@ function renderRapportiContrade(){
   if(!S) return;
   if(!S.intesaContrade) S.intesaContrade = {};
   if(S.incontriContradeMese === undefined) S.incontriContradeMese = 0;
+  if(S.accordiContradeMese === undefined) S.accordiContradeMese = 0;
   normalizzaRivalitaIntesaContrade();
+  const accordiEsauriti = S.accordiContradeMese >= MAX_ACCORDI_MESE_FANTINO;
 
   const righeHtml = CONTRADE.map(c=>{
     const valore = (S.intesaContrade[c.nome] !== undefined) ? S.intesaContrade[c.nome] : 50;
@@ -10297,6 +10476,7 @@ function renderRapportiContrade(){
       ? `<div style="font-family:var(--fn);font-size:10px;color:var(--ross);font-weight:700;margin-bottom:8px">⛔ Rivalità: l'intesa con ${bloccanti.join(', ')} è a ${SOGLIA_RIVALITA_INTESA}+, i rapporti con ${c.nome} sono bloccati a 0</div>`
       : '';
     const incontraDisabilitato = (S.incontriContradeMese>=1) || bloccata;
+    const accordoDisabilitato = bloccata || accordiEsauriti;
     return `
     <div class="card" style="margin-bottom:10px;padding:12px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -10316,7 +10496,7 @@ function renderRapportiContrade(){
         <button class="btn w" style="flex:1;margin-top:0;font-size:12px;padding:9px 6px;${incontraDisabilitato?'opacity:.35':''}" ${incontraDisabilitato?'disabled':''} onclick="avviaIncontroContrada('${escJs(c.nome)}')">
           🎲 Incontra
         </button>
-        <button class="btn gold w" style="flex:1;margin-top:0;font-size:12px;padding:9px 6px;${bloccata?'opacity:.35':''}" ${bloccata?'disabled':''} onclick="confermaAccordoContradaFantino('${escJs(c.nome)}')">
+        <button class="btn gold w" style="flex:1;margin-top:0;font-size:12px;padding:9px 6px;${accordoDisabilitato?'opacity:.35':''}" ${accordoDisabilitato?'disabled':''} onclick="confermaAccordoContradaFantino('${escJs(c.nome)}')">
           🤝 Accordo
         </button>
       </div>
@@ -10332,19 +10512,23 @@ function renderRapportiContrade(){
     </div>
     <div class="pad fade-in">
       <div class="screen-title" style="margin-top:8px">🏛️ Le 17 Contrade</div>
-      <div class="screen-sub">${S.incontriContradeMese>=1 ? 'Hai già incontrato una contrada questo mese.' : 'Puoi incontrare gratuitamente una contrada al mese, oppure stringere un accordo a pagamento.'}</div>
+      <div class="screen-sub">${S.incontriContradeMese>=1 ? 'Hai già incontrato una contrada questo mese.' : 'Puoi incontrare gratuitamente una contrada al mese, oppure stringere un accordo a pagamento.'}<br>Accordi: ${COSTO_ACCORDO_FANTINO} oro per un bonus di intesa casuale da +${BONUS_ACCORDO_FANTINO_MIN} a +${BONUS_ACCORDO_FANTINO_MAX} · usati questo mese: <strong style="color:${accordiEsauriti?'var(--ross)':'var(--ocra)'}">${S.accordiContradeMese}/${MAX_ACCORDI_MESE_FANTINO}</strong> (su tutte le contrade).</div>
       ${righeHtml}
     </div>
   </div>
   `);
 }
 
-/* ── Accordo: 300 oro per +10 di intesa, sempre disponibile (nessun limite mensile) ── */
+/* ── Accordo: 1500 oro per un bonus di intesa casuale (1-15), max 3 al mese su tutte le contrade ── */
 function confermaAccordoContradaFantino(nomeContrada){
   if(!S) return;
   const bloccanti = contradeCheBloccanoIntesa(nomeContrada);
   if(bloccanti.length){
     mostraPopupErrore('Rivalità in corso', `L'intesa con ${bloccanti.join(', ')} è a ${SOGLIA_RIVALITA_INTESA} o più: i rapporti con la Contrada del ${nomeContrada}, sua rivale storica, restano bloccati a 0.`);
+    return;
+  }
+  if((S.accordiContradeMese||0) >= MAX_ACCORDI_MESE_FANTINO){
+    mostraPopupErrore('Limite mensile raggiunto', `Hai già stretto ${MAX_ACCORDI_MESE_FANTINO} accordi questo mese (il limite vale per tutte le contrade insieme). Riprova il mese prossimo.`);
     return;
   }
   if(S.oro < COSTO_ACCORDO_FANTINO){
@@ -10357,7 +10541,7 @@ function confermaAccordoContradaFantino(nomeContrada){
   <div class="popup">
     <div class="popup-icon">🤝</div>
     <div class="popup-title">Confermi l'accordo?</div>
-    <div class="popup-body">Pagherai <strong style="color:var(--ocra)">${COSTO_ACCORDO_FANTINO} oro</strong> per ottenere <strong style="color:var(--ocra)">+${BONUS_ACCORDO_FANTINO}</strong> di intesa con la Contrada del <strong style="color:var(--ocra)">${nomeContrada}</strong>.</div>
+    <div class="popup-body">Pagherai <strong style="color:var(--ocra)">${COSTO_ACCORDO_FANTINO} oro</strong> per ottenere un bonus casuale da <strong style="color:var(--ocra)">+${BONUS_ACCORDO_FANTINO_MIN}</strong> a <strong style="color:var(--ocra)">+${BONUS_ACCORDO_FANTINO_MAX}</strong> di intesa con la Contrada del <strong style="color:var(--ocra)">${nomeContrada}</strong>.<br><br>Accordi usati questo mese: ${S.accordiContradeMese||0}/${MAX_ACCORDI_MESE_FANTINO}</div>
     <div style="display:flex;gap:8px">
       <button class="btn w" style="flex:1;margin-top:0" onclick="this.closest('.overlay').remove()">Annulla</button>
       <button class="btn gold w" style="flex:1;margin-top:0" onclick="this.closest('.overlay').remove();eseguiAccordoContradaFantino('${escJs(nomeContrada)}')">Conferma</button>
@@ -10368,15 +10552,20 @@ function confermaAccordoContradaFantino(nomeContrada){
 
 function eseguiAccordoContradaFantino(nomeContrada){
   if(!S) return;
+  if((S.accordiContradeMese||0) >= MAX_ACCORDI_MESE_FANTINO || S.oro < COSTO_ACCORDO_FANTINO) return;
+  const bonus = BONUS_ACCORDO_FANTINO_MIN + Math.floor(Math.random() * (BONUS_ACCORDO_FANTINO_MAX - BONUS_ACCORDO_FANTINO_MIN + 1));
+  S.accordiContradeMese = (S.accordiContradeMese||0) + 1;
   S.oro -= COSTO_ACCORDO_FANTINO;
   if(!S.intesaContrade) S.intesaContrade = {};
   const attuale = (S.intesaContrade[nomeContrada] !== undefined) ? S.intesaContrade[nomeContrada] : 50;
-  S.intesaContrade[nomeContrada] = Math.min(100, attuale + BONUS_ACCORDO_FANTINO);
+  S.intesaContrade[nomeContrada] = Math.min(100, attuale + bonus);
   applicaRivalitaIntesaContrada(nomeContrada);
-  S.log.push(`Accordo con la Contrada del ${nomeContrada}: -${COSTO_ACCORDO_FANTINO} oro, +${BONUS_ACCORDO_FANTINO} intesa (ora ${S.intesaContrade[nomeContrada]}).`);
+  S.log.push(`Accordo con la Contrada del ${nomeContrada}: -${COSTO_ACCORDO_FANTINO} oro, +${bonus} intesa (ora ${S.intesaContrade[nomeContrada]}). Accordi del mese: ${S.accordiContradeMese}/${MAX_ACCORDI_MESE_FANTINO}.`);
   verificaObiettivi();
   salvaCorrente();
   renderRapportiContrade();
+  mostraPopupMovimentoOro('🤝', 'Accordo concluso',
+    `Accordo con la Contrada del <strong style="color:var(--ocra-l)">${nomeContrada}</strong>.<br><br>Spesa: <strong style="color:var(--ross)">-${COSTO_ACCORDO_FANTINO} oro</strong><br>Intesa: <strong style="color:var(--verde)">+${bonus}</strong> (ora ${S.intesaContrade[nomeContrada]})<br><br>Accordi usati questo mese: ${S.accordiContradeMese}/${MAX_ACCORDI_MESE_FANTINO}`);
 }
 
 /* ═══════════════════════════════════════════════
@@ -11533,7 +11722,7 @@ function renderPopupLottoCavalli(){
     const escluso = S.cavalliEsclusiLotto && S.cavalliEsclusiLotto.includes(nome);
     return `
     <label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(200,153,30,.1);${stanco?'opacity:.45':''}">
-      <input type="checkbox" id="CHK_LOTTO_${idx}" ${stanco?'disabled':(escluso?'':'checked')} style="width:18px;height:18px;flex-shrink:0">
+      <input type="checkbox" id="CHK_LOTTO_${idx}" ${stanco?'disabled':''} onchange="aggiornaTotaleLotto()" style="width:18px;height:18px;flex-shrink:0">
       <div style="flex:1">
         <div style="font-family:var(--fn);font-size:13px;color:var(--ocra-l);font-weight:700">🐎 ${nome}</div>
         <div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.4)">${stanco?'Troppo stanco: non può correre questo mese':'Stanchezza '+st.stanchezza+'/'+STANCHEZZA_MAX_CAVALLO}</div>
@@ -11548,27 +11737,69 @@ function renderPopupLottoCavalli(){
     <div class="popup-icon">🎲</div>
     <div class="popup-title">Lotto della corsa</div>
     <div class="popup-body">
-      Quali dei tuoi cavalli vuoi inserire nel lotto assegnato a sorte per la corsa di questo mese?<br><br>
+      Quali dei tuoi cavalli vuoi iscrivere alla corsa di questo mese? Ogni cavallo iscritto costa <strong style="color:var(--ocra)">${COSTO_ISCRIZIONE_CAVALLO_CORSA} oro</strong> (anche se poi non verrà estratto per correre). Se un tuo cavallo arriva in finale guadagni <strong style="color:var(--verde)">+${PREMIO_CAVALLO_FINALE_PROVINCIA} oro</strong>, se la vince <strong style="color:var(--verde)">+${PREMIO_CAVALLO_VITTORIA_PROVINCIA} oro</strong>.<br><br>
       ${righe}
+      <div id="LOTTO_TOT" style="margin-top:10px;font-family:var(--fn);font-size:12px;color:var(--ocra-l)"></div>
     </div>
     <button class="btn gold w" onclick="confermaLottoCavalli()">Conferma</button>
+  </div>`;
+  R('APP').appendChild(ov);
+  aggiornaTotaleLotto();
+}
+
+/* Aggiorna il riepilogo costo/oro nel popup di iscrizione dei cavalli */
+function aggiornaTotaleLotto(){
+  const el = R('LOTTO_TOT');
+  if(!el || !S) return;
+  let n = 0;
+  S.cavalliPosseduti.forEach((nome,idx)=>{ const i = R('CHK_LOTTO_'+idx); if(i && i.checked) n++; });
+  const tot = n * COSTO_ISCRIZIONE_CAVALLO_CORSA;
+  const ok = tot <= S.oro;
+  el.innerHTML = `Cavalli iscritti: <strong>${n}</strong> · Costo: <strong style="color:${ok?'var(--ocra)':'var(--ross)'}">${tot} oro</strong> · Hai: ${S.oro} oro${ok?'':'<br><span style="color:var(--ross)">Oro insufficiente</span>'}`;
+}
+
+/* Popup informativo su una spesa o un guadagno di oro */
+function mostraPopupMovimentoOro(icona, titolo, corpo){
+  const ov = document.createElement('div');
+  ov.className='overlay';
+  ov.innerHTML=`
+  <div class="popup">
+    <div class="popup-icon">${icona}</div>
+    <div class="popup-title">${titolo}</div>
+    <div class="popup-body">${corpo}</div>
+    <button class="btn gold w" onclick="this.closest('.overlay').remove()">Capito</button>
   </div>`;
   R('APP').appendChild(ov);
 }
 
 function confermaLottoCavalli(){
   if(!S) return;
-  const esclusi = [];
+  const esclusi = [], iscritti = [];
   S.cavalliPosseduti.forEach((nome,idx)=>{
     const input = R('CHK_LOTTO_'+idx);
-    if(input && !input.checked) esclusi.push(nome);
+    if(input && input.checked) iscritti.push(nome);
+    else if(input) esclusi.push(nome);
   });
+  const costo = iscritti.length * COSTO_ISCRIZIONE_CAVALLO_CORSA;
+  if(costo > S.oro){
+    mostraPopupErrore('Oro insufficiente', `L'iscrizione di ${iscritti.length} cavall${iscritti.length===1?'o':'i'} costa ${costo} oro, ma ne possiedi ${S.oro}. Iscrivi meno cavalli.`);
+    return;
+  }
+  S.oro -= costo;
   S.cavalliEsclusiLotto = esclusi;
+  S.cavalliIscrittiMese = iscritti;
   S.lottoDecisoMese = true;
+  if(costo > 0){
+    S.log.push(`Iscrizione di ${iscritti.length} cavall${iscritti.length===1?'o':'i'} alle corse in provincia (${iscritti.join(', ')}): -${costo} oro.`);
+  }
   const ovEl = document.querySelector('.overlay');
   if(ovEl) ovEl.remove();
   salvaCorrente();
   renderSceltaPartecipazioneCorsaFantino();
+  if(costo > 0){
+    mostraPopupMovimentoOro('💸', 'Iscrizione cavalli',
+      `Hai iscritto ${iscritti.length} cavall${iscritti.length===1?'o':'i'} alla corsa di questo mese:<br><strong style="color:var(--ocra-l)">${iscritti.join(', ')}</strong><br><br>Spesa: <strong style="color:var(--ross)">-${costo} oro</strong><br>Oro rimasto: ${S.oro}`);
+  }
 }
 
 /* Schermata intermedia: chiede al giocatore se vuole pagare la quota e partecipare
@@ -11625,6 +11856,8 @@ function generaCorsaProvinciaMeseFantino(giocatorePartecipa){
   const poolCavalli = CAVALLI_DB.filter(c=>{
     const posseduto = S.cavalliPosseduti && S.cavalliPosseduti.includes(c.nome);
     if(!posseduto) return true;
+    // Se il giocatore ha iscritto i cavalli (nuovo sistema) corrono solo gli iscritti
+    if(Array.isArray(S.cavalliIscrittiMese) && !S.cavalliIscrittiMese.includes(c.nome)) return false;
     const escluso = S.cavalliEsclusiLotto && S.cavalliEsclusiLotto.includes(c.nome);
     const stanco = statoVivoCavallo(c.nome).stanchezza >= STANCHEZZA_MAX_CAVALLO;
     return !escluso && !stanco;
@@ -11632,7 +11865,7 @@ function generaCorsaProvinciaMeseFantino(giocatorePartecipa){
     const posseduto = S.cavalliPosseduti && S.cavalliPosseduti.includes(c.nome);
     if(!posseduto) return c;
     const st = statoVivoCavallo(c.nome);
-    return { nome:c.nome, velocita:st.velocita, accelerazione:st.accelerazione, tenuta_curva:st.tenuta_curva, resistenza:st.resistenza, nervosismo:st.nervosismo };
+    return { nome:c.nome, velocita:st.velocita, accelerazione:st.accelerazione, tenuta_curva:st.tenuta_curva, resistenza:st.resistenza, nervosismo:st.nervosismo, colore:c.colore };
   });
   const cavalliScelti = pescaCasualiUnici(poolCavalli, 12);
   const coppie = fantiniScelti.map((f,i)=>({ fantino:f, cavallo:cavalliScelti[i] }));
@@ -11729,7 +11962,7 @@ function renderSchermataCorseFantino(){
         ${b.coppie.map(c=>renderCoppiaRiga(c, giaFatta)).join('')}
         ${giaFatta ? `
           <div style="margin-top:10px;font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5)">Ordine d'arrivo:</div>
-          ${b.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+          ${b.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
         ` : (eProssima ? `<button class="btn gold w" onclick="avviaDisputaBatteriaFantino(${idx})">🏁 Disputa la Batteria ${b.numero}</button>` : `<div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.3);margin-top:8px;font-style:italic">In attesa delle batterie precedenti…</div>`)}
       </div>`;
     });
@@ -11754,7 +11987,7 @@ function renderSchermataCorseFantino(){
       ${corsa.finale.coppie.map(c=>renderCoppiaRiga(c, !!corsa.finale.completata)).join('')}
       ${corsa.finale.completata ? `
         <div style="margin-top:10px;font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.5)">Ordine d'arrivo:</div>
-        ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+        ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:12px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:2px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
         <button class="btn gold w" onclick="concludiCorseProvinciaFantino()">Continua →</button>
       ` : `<button class="btn gold w" onclick="avviaDisputaFinaleFantino()">🏆 Disputa la Finale</button>`}
     </div>`;
@@ -11762,7 +11995,7 @@ function renderSchermataCorseFantino(){
   } else if(corsa.faseAttuale === 'conclusa'){
     corpoHtml += `<div class="card">
       <div class="card-title">🏆 Risultato della Finale</div>
-      ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:13px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:3px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta?' <span style="color:var(--ross)">(caduta)</span>':''}</div>`).join('')}
+      ${corsa.finale.risultato.map((r,i)=>`<div style="font-family:var(--fn);font-size:13px;color:${i===0?'var(--ocra)':'var(--ocra-l)'};font-weight:${i===0?'700':'400'};padding:3px 0">${i+1}° ${r.fantino.nome} su ${r.cavallo.nome}${r.caduta||r.scosso ? ' '+htmlEsitoCorsa(r) : ''}</div>`).join('')}
       <div style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.35);margin-top:10px;font-style:italic">La corsa di questo mese si è conclusa. Una nuova corsa sarà disponibile il mese prossimo.</div>
       <button class="btn w" onclick="renderCorseProvinciaFantino()">← Torna alle Corse</button>
     </div>`;
@@ -11805,6 +12038,7 @@ function disputaBatteriaFantino(idx, bonusVelocitaMossaGiocatore){
   const b = corsa.batterie[idx];
   if(!b || b.completata) return;
   const pista = PISTE_PROVINCIA[corsa.pistaChiave];
+  let popupCavalliFinale = null;
   // Applica il bonus mossa solo alla coppia del giocatore, se presente
   b.coppie.forEach(c=>{ if(c.giocatore) c.bonusVelocitaMossa = bonusVelocitaMossaGiocatore; });
   b.risultato = simulaGara(b.coppie, pista);
@@ -11830,9 +12064,22 @@ function disputaBatteriaFantino(idx, bonusVelocitaMossaGiocatore){
     if(corsa.giocatorePartecipa && !vincitori.some(v=>v.giocatore)){
       corsa.giocatoreEliminato = true;
     }
+    // Stalla: ogni cavallo del giocatore che accede alla finale guadagna un premio
+    // (anche se a montarlo è un altro fantino, e anche se il giocatore osserva soltanto)
+    const cavalliFinalisti = vincitori.map(v=>v.cavallo.nome).filter(n=>S.cavalliPosseduti && S.cavalliPosseduti.includes(n));
+    if(cavalliFinalisti.length){
+      const tot = cavalliFinalisti.length * PREMIO_CAVALLO_FINALE_PROVINCIA;
+      S.oro += tot;
+      S.log.push(`Cavall${cavalliFinalisti.length===1?'o':'i'} in finale alla corsa in provincia (${cavalliFinalisti.join(', ')}): +${tot} oro.`);
+      popupCavalliFinale = { nomi:cavalliFinalisti, tot };
+    }
   }
   salvaCorrente();
   renderSchermataCorseFantino();
+  if(popupCavalliFinale){
+    mostraPopupMovimentoOro('🐎', 'Un tuo cavallo è in finale!',
+      `<strong style="color:var(--ocra-l)">${popupCavalliFinale.nomi.join(', ')}</strong> ${popupCavalliFinale.nomi.length===1?'ha raggiunto':'hanno raggiunto'} la finale.<br><br>Guadagno: <strong style="color:var(--verde)">+${popupCavalliFinale.tot} oro</strong><br>Oro attuale: ${S.oro}`);
+  }
 }
 
 function vaiAllaFinaleProvinciaFantino(){
@@ -11874,12 +12121,24 @@ function disputaFinaleFantino(bonusVelocitaMossaGiocatore){
       S.log.push('Vittoria in finale: Bravura +1.');
     }
   }
+  // Stalla: se la finale è vinta da un cavallo del giocatore (montato da chiunque) → premio
+  const nomeCavalloVincente = corsa.finale.risultato[0] && corsa.finale.risultato[0].cavallo ? corsa.finale.risultato[0].cavallo.nome : null;
+  let popupCavalloVincente = null;
+  if(nomeCavalloVincente && S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCavalloVincente)){
+    S.oro += PREMIO_CAVALLO_VITTORIA_PROVINCIA;
+    S.log.push(`Il tuo cavallo ${nomeCavalloVincente} ha vinto la finale alla corsa in provincia: +${PREMIO_CAVALLO_VITTORIA_PROVINCIA} oro.`);
+    popupCavalloVincente = nomeCavalloVincente;
+  }
   // Se il giocatore ha partecipato di persona ed è arrivato in finale, cresce l'intesa
   // con una delle 17 contrade scelta a caso (chi osserva soltanto non ottiene nulla)
   const esitoIntesa = applicaBonusIntesaFinaleProvinciaFantino(corsa);
   verificaObiettivi();
   salvaCorrente();
   renderSchermataCorseFantino();
+  if(popupCavalloVincente){
+    mostraPopupMovimentoOro('🏆', 'Il tuo cavallo ha vinto!',
+      `<strong style="color:var(--ocra-l)">${popupCavalloVincente}</strong> ha vinto la finale.<br><br>Guadagno: <strong style="color:var(--verde)">+${PREMIO_CAVALLO_VITTORIA_PROVINCIA} oro</strong><br>Oro attuale: ${S.oro}`);
+  }
   mostraPopupBonusIntesaProvincia(esitoIntesa);
 }
 
@@ -12087,7 +12346,7 @@ function renderTrattaPalioFantino(tipoPalio){
           <div style="flex:1">
             <span style="font-family:var(--fn);font-size:12px;font-weight:${r.giocatore?'700':(i===0?'700':'400')};color:${r.giocatore?'var(--verde)':(i===0?'var(--ocra-l)':'var(--perg2)')}">🐎 ${r.cavallo.nome}</span>
             <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.4)"> — 🏇 ${r.giocatore?'<strong style="color:var(--verde)">tu</strong>':r.fantino.nome}</span>
-            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+            ${htmlEsitoCorsa(r, 'font-family:var(--fn);font-size:10px;margin-left:4px;')}
           </div>
         </div>`).join('');
     }
@@ -12234,7 +12493,7 @@ function renderPresentazioneLottoFantino(tipoPalio){
         const posIdx = gara.risultato.findIndex(r => r.cavallo.nome === nome);
         if(posIdx === -1) return;
         const r = gara.risultato[posIdx];
-        righeTratta += `<div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:2px 3px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${r.caduta?' (caduta)':''}</div>`;
+        righeTratta += `<div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:2px 3px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${testoEsitoCorsa(r)}</div>`;
       });
     }
 
@@ -12551,7 +12810,7 @@ function renderOffertePalioFantino(tipoPalio){
         const posIdx = gara.risultato.findIndex(r => r.cavallo.nome === nomeCavallo);
         if(posIdx === -1) return;
         const r = gara.risultato[posIdx];
-        righeTratta += `<span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:4px 4px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${r.caduta?' (caduta)':''}</span>`;
+        righeTratta += `<span style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:4px 4px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${testoEsitoCorsa(r)}</span>`;
       });
     }
 
@@ -12733,13 +12992,7 @@ function costruisciCoppieProveFantino(tipoPalio){
     const nomeCav = contradaCavallo[nomeContrada];
 
     let cavBase = null;
-    if(nomeCav && isMe && S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCav)){
-      const st = statoVivoCavallo(nomeCav);
-      if(st) cavBase = Object.assign({ nome:nomeCav }, st);
-    }
-    if(!cavBase && nomeCav && typeof CAVALLI_DB !== 'undefined'){
-      cavBase = CAVALLI_DB.find(c => c.nome === nomeCav) || null;
-    }
+    cavBase = cavalloPerPalioFantino(nomeCav);
     if(!cavBase) cavBase = { nome: nomeCav || 'Cavallo', velocita:3, accelerazione:3, tenuta_curva:3, resistenza:3, nervosismo:2 };
 
     const cavallo = Object.assign({}, cavBase);
@@ -12769,7 +13022,7 @@ function costruisciCoppieProveFantino(tipoPalio){
 function simulaProvaFantino(coppie, pista){
   const risultati = coppie.map(c => {
     const r = simulaCorsaCoppia(c.cavallo, c.fantino, pista, c.bonusVelocitaMossa);
-    return { nomeContrada:c.nomeContrada, cavallo:c.cavallo, fantino:c.fantino, tempo:r.tempo, caduta:r.caduta, giocatore:!!c.giocatore };
+    return { nomeContrada:c.nomeContrada, cavallo:c.cavallo, fantino:c.fantino, tempo:r.tempo, caduta:r.caduta, scosso:r.scosso, giocatore:!!c.giocatore };
   });
   // Anche qui: le accoppiate papabili per il podio giocano coperto nelle prove
   // (stessa logica della Carriera Capitano, vedi applicaGiocoCopertoProve).
@@ -12912,7 +13165,7 @@ function renderProvePalioFantino(tipoPalio){
           <div style="flex:1">
             <span style="font-family:var(--fn);font-size:12px;font-weight:${r.giocatore?'700':(i===0?'700':'400')};color:${r.giocatore?'var(--verde)':(i===0?'var(--ocra-l)':'var(--perg2)')}">🏛️ ${r.nomeContrada}</span>
             <span style="font-family:var(--fn);font-size:11px;color:rgba(200,153,30,.4)"> — 🐎 ${(r.cavallo && r.cavallo.nome) || 'Cavallo'} · 🏇 ${r.giocatore?'<strong style="color:var(--verde)">tu</strong>':r.fantino.nome}</span>
-            ${r.caduta ? '<span style="font-family:var(--fn);font-size:10px;color:var(--ross);margin-left:4px">(caduta)</span>' : ''}
+            ${htmlEsitoCorsa(r, 'font-family:var(--fn);font-size:10px;margin-left:4px;')}
           </div>
         </div>`).join('');
       const effDef = gara.effetto ? EFFETTI_PROVE_FANTINO.find(e => e.id === gara.effetto) : null;
@@ -13174,7 +13427,7 @@ function preparaAccordiFantiniRivali(tipoPalio){
     Object.entries(assegnazioniCavalli).forEach(([cav, con]) => { contradaCavallo[con] = cav; });
     const vociCavalli = contradeRivali.map(nomeContrada => {
       const nomeCav = contradaCavallo[nomeContrada];
-      const cav = (nomeCav && typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(c => c.nome === nomeCav) : null;
+      const cav = cavalloPerPalioFantino(nomeCav);
       return { chiave: nomeContrada, cavallo: cav };
     });
     const abbinamento = _assegnaFantiniACavalliPerForza(vociCavalli, scelti);
@@ -13571,7 +13824,7 @@ function renderIstruzioniCapitanoFantino(tipoPalio){
         const posIdx = gara.risultato.findIndex(r => r.cavallo.nome === nomeCavalloGiocatore);
         if(posIdx === -1) return;
         const r = gara.risultato[posIdx];
-        righeTratta += `<div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:2px 3px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${r.caduta?' (caduta)':''}</div>`;
+        righeTratta += `<div style="font-family:var(--fn);font-size:10px;color:rgba(200,153,30,.5);background:rgba(200,153,30,.06);border:1px solid rgba(200,153,30,.15);border-radius:5px;padding:2px 6px;display:inline-block;margin:2px 3px 0 0">Batt.${gIdx+1}: ${posIdx+1}°${testoEsitoCorsa(r)}</div>`;
       });
     }
 
@@ -14111,12 +14364,7 @@ function avviaMossaCorsaFantino(tipoPalio){
   const trovaCavalloPerContrada = (nomeContrada) => {
     const nomeCav = Object.keys(assegnazioni).find(nc => assegnazioni[nc] === nomeContrada);
     if(!nomeCav) return statDefault;
-    if(nomeContrada === contradaGiocatore && S.cavalliPosseduti && S.cavalliPosseduti.includes(nomeCav)){
-      const st = statoVivoCavallo(nomeCav);
-      if(st) return st;
-    }
-    const base = (typeof CAVALLI_DB !== 'undefined') ? CAVALLI_DB.find(c => c.nome === nomeCav) : null;
-    return base || statDefault;
+    return cavalloPerPalioFantino(nomeCav) || statDefault;
   };
 
   const partecipanti = datiPalio.partecipanti || [];
@@ -14403,7 +14651,8 @@ function renderVincitorePalioFantino(tipoPalio){
       if (!S.alboDoro) S.alboDoro = [];
       const assegnazioniVittoriaFan = datiPalio.assegnazione ? datiPalio.assegnazione.assegnazioni : {};
       const cavalloVincitoreFan = Object.keys(assegnazioniVittoriaFan).find(cav => assegnazioniVittoriaFan[cav] === contradaGiocatore) || null;
-      S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'fantino', contrada: contradaGiocatore, cavallo: cavalloVincitoreFan });
+      const esitoVittoriaFan = corsa && corsa.esiti ? corsa.esiti[contradaGiocatore] : null;
+      S.alboDoro.push({ anno: S.anno, mese: nomePalio, tipo: 'fantino', contrada: contradaGiocatore, cavallo: cavalloVincitoreFan, scosso: !!(esitoVittoriaFan && esitoVittoriaFan.scosso) });
     } else if(suiPodio){
       S.log.push(`Piazzamento al ${piazzamento}° posto al Palio di ${nomePalio} ${S.anno}: nessun effetto su fama, intesa o statistiche.`);
     } else {
