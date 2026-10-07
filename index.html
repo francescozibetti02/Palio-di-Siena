@@ -10180,6 +10180,20 @@ function eseguiAvanzamentoMeseFantinoEffettivo(){
     S.scoreCavalliAnno = {};
   }
   if(nuovoAnno){
+    // Intesa con le contrade in base ai Palii (Luglio/Agosto) vinti dal giocatore nell'annata appena conclusa:
+    // 2 vinti → invariata · 1 vinto → -5 con tutte le contrade · nessuno → -10 con tutte le contrade
+    const vintiAnno = S.paliVintiAnnoFantino || {};
+    const nVinti = (vintiAnno.luglio ? 1 : 0) + (vintiAnno.agosto ? 1 : 0);
+    const malusAnno = nVinti >= 2 ? 0 : (nVinti === 1 ? 5 : 10);
+    if(malusAnno > 0){
+      if(!S.intesaContrade) S.intesaContrade = {};
+      CONTRADE.forEach(c=>{
+        const att = (S.intesaContrade[c.nome] !== undefined) ? S.intesaContrade[c.nome] : 50;
+        S.intesaContrade[c.nome] = Math.max(0, att - malusAnno);
+      });
+    }
+    S.log.push(`Bilancio dell'annata: ${nVinti} Palii vinti su 2 → intesa con le contrade ${malusAnno ? '−'+malusAnno : 'invariata'}.`);
+    S.paliVintiAnnoFantino = {};
     // I risultati del Palio di quest'annata sono ormai conclusi: si riparte daccapo per la prossima
     S.palioLuglioAnno = null;
     S.palioAgostoAnno = null;
@@ -14632,6 +14646,9 @@ function renderVincitorePalioFantino(tipoPalio){
 
     if(giocatoreVince){
       S.vittorie = (S.vittorie || 0) + 1;
+      // Traccia i Palii vinti in quest'annata (serve al calcolo dell'intesa di fine anno)
+      if(!S.paliVintiAnnoFantino) S.paliVintiAnnoFantino = {};
+      S.paliVintiAnnoFantino[tipoPalio] = true;
       S.fama = Math.min(100, (S.fama || 0) + 20);
       const intesaAttuale = (S.intesaContrade[contradaGiocatore] !== undefined) ? S.intesaContrade[contradaGiocatore] : 50;
       S.intesaContrade[contradaGiocatore] = Math.min(100, intesaAttuale + 20);
@@ -14670,6 +14687,11 @@ function renderVincitorePalioFantino(tipoPalio){
       S.empatia = Math.max(1, Math.min(5, (S.empatia||1) - 1));
       S.log.push(`Piazzamento al ${piazzamento||'?'}° posto al Palio di ${nomePalio} ${S.anno}: Fama −5, Intesa Contrada del ${contradaGiocatore} −10, Intesa con le altre 16 contrade +10, Esperienza −1, Bravura −1, Empatia −1.`);
     }
+    // Se il Palio lo vince la rivale della contrada montata, l'intesa con la contrada montata va a 0
+    if(!giocatoreVince && vincitore && RAPPORTI_CONTRADE[contradaGiocatore] && RAPPORTI_CONTRADE[contradaGiocatore].rivali.includes(vincitore)){
+      S.intesaContrade[contradaGiocatore] = 0;
+      S.log.push(`Il Palio di ${nomePalio} ${S.anno} è stato vinto dalla rivale (${vincitore}): l'intesa con la Contrada del ${contradaGiocatore} va a 0.`);
+    }
     if(premioOro > 0) S.log.push(`Premio piazzamento (${piazzamento}° posto): +${premioOro} oro.`);
 
     // Evoluzione statistiche degli altri fantini in corsa (il giocatore è escluso:
@@ -14694,6 +14716,8 @@ function renderVincitorePalioFantino(tipoPalio){
     : suiPodio
       ? '🥈🥉 Nessun effetto su fama, intesa o statistiche — solo il premio in oro'
       : '😔 Fama −5 · 🤝 Intesa Contrada −10 · 🤝 Intesa altre contrade +10 · 🎯 Bravura −1 · 📚 Esperienza −1 · 🧠 Empatia −1';
+  const rivaleHaVinto = !giocatoreVince && RAPPORTI_CONTRADE[contradaGiocatore] && RAPPORTI_CONTRADE[contradaGiocatore].rivali.includes(vincitore);
+  const corpoEffettiFinale = corpoEffetti + (rivaleHaVinto ? ` · 💢 Ha vinto la rivale: Intesa con ${contradaGiocatore} azzerata` : '');
 
   setMain(`
   <div>
@@ -14726,7 +14750,7 @@ function renderVincitorePalioFantino(tipoPalio){
         </div>
         ${piazzamento ? `<div style="font-family:var(--fn);font-size:12px;color:rgba(200,153,30,.6);margin-bottom:6px">Il tuo piazzamento: <strong style="color:var(--ocra)">${piazzamento}° posto</strong></div>` : ''}
         ${premioOro > 0 ? `<div style="font-family:var(--fn);font-size:13px;color:var(--verde);font-weight:700;margin-bottom:6px">💰 +${premioOro} oro incassati</div>` : ''}
-        <div style="font-family:var(--fn);font-size:11px;color:${(giocatoreVince||suiPodio)?'var(--verde)':'var(--ross)'};margin-bottom:6px">${corpoEffetti}</div>
+        <div style="font-family:var(--fn);font-size:11px;color:${(giocatoreVince||suiPodio)?'var(--verde)':'var(--ross)'};margin-bottom:6px">${corpoEffettiFinale}</div>
         <button class="btn gold w" style="margin-top:12px" onclick="${nextFn}">
           ${tipoPalio === 'luglio' ? '📅 Vai a Luglio →' : '📅 Nuovo anno →'}
         </button>
