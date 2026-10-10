@@ -494,6 +494,7 @@ body{font-family:var(--fs)}
 </div>
 <script src="fantini_db.js"></script>
 <script src="cavalli_db.js"></script>
+<script src="cavallo_codice.js"></script>
 <script>
 'use strict';
 
@@ -2438,7 +2439,7 @@ function preparaCorsaPalio(tipoPalio) {
         break;
       }
     }
-    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, caduto: esitoCaduto };
+    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, giroScosso: statoScosso.giro, caduto: esitoCaduto };
   });
 
   /* Classifica finale per tempo cumulativo */
@@ -2458,7 +2459,7 @@ function preparaCorsaPalio(tipoPalio) {
     coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
-    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto }])),   // scosso / caduto per contrada
+    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto, giroScosso: e.giroScosso }])),   // scosso / caduto per contrada
     giroMostrato: 0,   // quanti giri ha già visto il giocatore (0 = nessuno)
     conclusa: false,
     paloDisturbo       // contrade nemiche che hanno fatto il palio di disturbo (solo il nome è mostrato)
@@ -2579,7 +2580,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
         break;
       }
     }
-    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, caduto: esitoCaduto };
+    return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, giroScosso: statoScosso.giro, caduto: esitoCaduto };
   });
 
   const classifica = tempiGiri.slice().sort((a, b) => a.tempoCumulativo - b.tempoCumulativo);
@@ -2598,7 +2599,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
     coppie: coppie.map(cp => ({ nomeContrada: cp.nomeContrada, isMe: cp.isMe, nomeFantino: cp.fantino?.nome, coloreCavallo: estraiColoreCavalloDB(cp.cavallo) })),
     classificaGiri,
     classificaFinale: classifica.map(e => e.nomeContrada),
-    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto }])),   // scosso / caduto per contrada
+    esiti: Object.fromEntries(tempiGiri.map(e => [e.nomeContrada, { scosso: !!e.scosso, caduta: !!e.caduto, giroScosso: e.giroScosso }])),   // scosso / caduto per contrada
     giroMostrato: 0,
     conclusa: false,
     paloDisturbo
@@ -2646,6 +2647,7 @@ function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPreced
         if(!scosso && rischioScossoUnita > 0 && Math.random() < rischioScossoUnita * Math.max(1, velocitaAttuale*passo)){
           scosso = true;
           statoScosso.scosso = true;
+          if (statoScosso.giro == null) statoScosso.giro = numeroGiro;   // giro in cui il fantino cade (per l'animazione)
           ({ resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, true));
         }
         const fattoreCurva = Math.min(1.0, 0.45 + tenutaCurvaEff*0.09) / seg.severita;
@@ -2678,434 +2680,12 @@ function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPreced
 }
 
 /* ═══════════════════════════════════════════════
-   COLORI CONTRADE — pallini araldici per la simulazione grafica
-   Ogni funzione disegna il pallino su un <canvas> 2D
+   DISEGNO DEI CAVALLI E DEI FANTINI → spostato in cavallo_codice.js
+   (caricato con <script src="cavallo_codice.js"> prima di questo script).
+   Da lì arrivano: COLORI_CONTRADE, disegnaPallinoPalio, palette del mantello,
+   disegnaCavalloPalio, disegnaCavalloAlCanapo e le animazioni (cavallo scosso,
+   caduta del fantino/del cavallo, vittoria, sorpasso, presa della giubba).
 ═══════════════════════════════════════════════ */
-const COLORI_CONTRADE = {
-  'Aquila':      { tipo:'cerchi', sfondo:'#E8C830', cerchi:[{r:.38,col:'#1A3A9C'},{r:.20,col:'#111111'}] },
-  'Bruco':       { tipo:'quadrantie', q1:'#E8C830', q2:'#2E7A2E', centro:{r:.28,col:'#1A3A9C'} },
-  'Chiocciola':  { tipo:'quadrantie', q1:'#E8C830', q2:'#CC2222', centro:{r:.28,col:'#1A3A9C'} },
-  'Civetta':     { tipo:'quadrantie', q1:'#CC2222', q2:'#111111', centro:{r:.28,col:'#FFFFFF'} },
-  'Drago':       { tipo:'quadrantie', q1:'#CC2222', q2:'#2E7A2E', centro:{r:.28,col:'#E8C830'} },
-  'Giraffa':     { tipo:'quadrantie', q1:'#FFFFFF', q2:'#CC2222', centro:null },
-  'Istrice':     { tipo:'istrice', sfondo:'#FFFFFF', interno:'#111111', raggi:['#1A3A9C','#CC2222','#111111'] },
-  'Leocorno':    { tipo:'quadrantie', q1:'#FFFFFF', q2:'#E87020', centro:{r:.28,col:'#1A3A9C'} },
-  'Lupa':        { tipo:'quadrantie', q1:'#FFFFFF', q2:'#111111', centro:{r:.28,col:'#E87020'} },
-  'Nicchio':     { tipo:'cerchi', sfondo:'#1A3A9C', cerchi:[{r:.38,col:'#E8C830'},{r:.20,col:'#CC2222'}] },
-  'Oca':         { tipo:'quadrantie', q1:'#FFFFFF', q2:'#2E7A2E', centro:{r:.28,col:'#CC2222'} },
-  'Onda':        { tipo:'quadrantie', q1:'#FFFFFF', q2:'#7ABCDC', centro:null },
-  'Pantera':     { tipo:'quadrantie', q1:'#1A3A9C', q2:'#CC2222', centro:{r:.28,col:'#FFFFFF'} },
-  'Selva':       { tipo:'quadrantie', q1:'#E87020', q2:'#2E7A2E', centro:{r:.28,col:'#FFFFFF'} },
-  'Tartuca':     { tipo:'quadrantie', q1:'#E8C830', q2:'#1A3A9C', centro:null },
-  'Torre':       { tipo:'cerchi', sfondo:'#6B1020', cerchi:[{r:.38,col:'#FFFFFF'},{r:.20,col:'#1A3A9C'}] },
-  'Valdimontone':{ tipo:'quadrantie', q1:'#E8C830', q2:'#CC2222', centro:{r:.28,col:'#FFFFFF'} },
-};
-
-function disegnaPallinoPalio(ctx, x, y, r, nomeCon) {
-  // Cerca sia nome esatto sia corrispondenza parziale
-  let def = COLORI_CONTRADE[nomeCon];
-  if (!def) {
-    const k = Object.keys(COLORI_CONTRADE).find(k => nomeCon && nomeCon.toLowerCase().includes(k.toLowerCase()));
-    def = k ? COLORI_CONTRADE[k] : null;
-  }
-  if (!def) {
-    // Fallback: pallino arancio generico
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fillStyle='#C8991E'; ctx.fill();
-    return;
-  }
-
-  const tipo = def.tipo;
-
-  if (tipo === 'cerchi') {
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fillStyle = def.sfondo; ctx.fill();
-    def.cerchi.forEach(c => {
-      ctx.beginPath(); ctx.arc(x,y,r*c.r,0,Math.PI*2);
-      ctx.fillStyle = c.col; ctx.fill();
-    });
-
-  } else if (tipo === 'quadrantie') {
-    // 4 quadranti: alto-sin e basso-dx = q1, alto-dx e basso-sin = q2
-    ctx.save();
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.clip();
-    // alto-sin (q1)
-    ctx.fillStyle = def.q1;
-    ctx.fillRect(x-r, y-r, r, r);
-    // basso-dx (q1)
-    ctx.fillRect(x, y, r, r);
-    // alto-dx (q2)
-    ctx.fillStyle = def.q2;
-    ctx.fillRect(x, y-r, r, r);
-    // basso-sin (q2)
-    ctx.fillRect(x-r, y, r, r);
-    ctx.restore();
-    if (def.centro) {
-      ctx.beginPath(); ctx.arc(x,y,r*def.centro.r,0,Math.PI*2);
-      ctx.fillStyle = def.centro.col; ctx.fill();
-    }
-
-  } else if (tipo === 'istrice') {
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fillStyle = def.sfondo; ctx.fill();
-    // Raggi alternati
-    const colori = def.raggi;
-    const nRaggi = 12;
-    for (let i=0; i<nRaggi; i++) {
-      const ang = (i/nRaggi)*Math.PI*2;
-      ctx.beginPath();
-      ctx.moveTo(x + Math.cos(ang)*r*0.26, y + Math.sin(ang)*r*0.26);
-      ctx.lineTo(x + Math.cos(ang)*r*0.92, y + Math.sin(ang)*r*0.92);
-      ctx.strokeStyle = colori[i % colori.length];
-      ctx.lineWidth = r*0.13;
-      ctx.stroke();
-    }
-    // Pallino nero centrale con pallino bianco
-    ctx.beginPath(); ctx.arc(x,y,r*0.32,0,Math.PI*2);
-    ctx.fillStyle = def.interno; ctx.fill();
-    ctx.beginPath(); ctx.arc(x,y,r*0.14,0,Math.PI*2);
-    ctx.fillStyle = '#FFFFFF'; ctx.fill();
-  }
-
-  // Bordo sottile per leggibilità
-  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-  ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1; ctx.stroke();
-}
-
-/* ═══════════════════════════════════════════════
-   CAVALLO VISTO DALL'ALTO — disegno realistico e animato
-   Corpo centrale (col fantino/pallino sopra), collo con criniera,
-   testa con orecchie, coda. Il tutto animato in base alla fase di
-   galoppo (legata alla distanza percorsa, non al tempo assoluto:
-   così un cavallo più veloce "corre" visivamente più veloce).
-   x,y  = posizione del centro del cavallo sulla pista (coord. canvas)
-   r    = raggio di riferimento (stessa unità usata per il pallino)
-   nomeCon = nome della contrada (colori del fantino)
-   angolo  = direzione di marcia in radianti (atan2, coerente col canvas)
-   fase    = fase di galoppo continua (radianti), cresce con la distanza
-   palette = { chiaro, medio, scuro, colloA, colloB, testaA, testaB }
-             tonalità derivate dal colore/mantello del cavallo preso dal
-             database esterno (CAVALLI_DB); se assente si usa il bruno
-             di default (retrocompatibilità con dati senza colore)
-═══════════════════════════════════════════════ */
-
-// Colore di mantello di default (usato se il cavallo non ha un colore nel DB)
-const PALETTE_CAVALLO_DEFAULT = {
-  chiaro: '#8a5a34', medio: '#6b4222', scuro: '#4a2c14',
-  colloA: '#6b4222', colloB: '#7a4d28',
-  testaA: '#7a4d28', testaB: '#4a2c14'
-};
-
-/* Estrae la stringa colore/mantello di un cavallo dal database esterno,
-   provando i possibili nomi di campo usati in cavalli_db.js */
-function estraiColoreCavalloDB(cav) {
-  if (!cav) return null;
-  const candidati = [cav.colore, cav.color, cav.mantello, cav.colorePelo, cav.coloreManto, cav.colorMantello];
-  const trovato = candidati.find(v => typeof v === 'string' && v.trim().length > 0);
-  return trovato ? trovato.trim() : null;
-}
-
-/* Normalizza una qualsiasi stringa colore CSS valida (nome, hex, rgb...)
-   nell'equivalente esadecimale, usando un canvas 1x1 come "interprete"
-   ufficiale dei colori del browser. Ritorna null se il colore non è valido. */
-function normalizzaColoreHex(colorStr) {
-  if (!colorStr) return null;
-  try {
-    if (!window._coloreProbeCanvas) {
-      window._coloreProbeCanvas = document.createElement('canvas');
-      window._coloreProbeCanvas.width = 1;
-      window._coloreProbeCanvas.height = 1;
-    }
-    const cx = window._coloreProbeCanvas.getContext('2d');
-    cx.clearRect(0, 0, 1, 1);
-    cx.fillStyle = '#000000';
-    cx.fillStyle = colorStr; // se non valido, il browser ignora l'assegnazione
-    const provaFill = cx.fillStyle;
-    cx.fillRect(0, 0, 1, 1);
-    const d = cx.getImageData(0, 0, 1, 1).data;
-    if (provaFill === '#000000' && colorStr.toLowerCase() !== 'black' && colorStr.toLowerCase() !== '#000' && colorStr.toLowerCase() !== '#000000') {
-      return null; // colore non riconosciuto dal browser
-    }
-    return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
-  } catch (e) {
-    return null;
-  }
-}
-
-/* Schiarisce (percent > 0) o scurisce (percent < 0) un colore esadecimale */
-function sfumaColoreHex(hex, percent) {
-  const num = parseInt(hex.slice(1), 16);
-  let r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
-  const amt = Math.round(2.55 * percent);
-  r = Math.min(255, Math.max(0, r + amt));
-  g = Math.min(255, Math.max(0, g + amt));
-  b = Math.min(255, Math.max(0, b + amt));
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-}
-
-/* Costruisce la palette di tonalità (corpo/collo/testa) a partire dal
-   colore grezzo del cavallo preso dal database. Se il colore manca o non
-   è valido, ricade sulla palette bruna di default. */
-function costruisciPaletteCavallo(colorStrGrezzo) {
-  const hex = normalizzaColoreHex(colorStrGrezzo);
-  if (!hex) return PALETTE_CAVALLO_DEFAULT;
-  return {
-    chiaro: sfumaColoreHex(hex, 20),
-    medio:  hex,
-    scuro:  sfumaColoreHex(hex, -32),
-    colloA: sfumaColoreHex(hex, -6),
-    colloB: sfumaColoreHex(hex, 10),
-    testaA: sfumaColoreHex(hex, 10),
-    testaB: sfumaColoreHex(hex, -32)
-  };
-}
-
-function disegnaCavalloPalio(ctx, x, y, r, nomeCon, angolo, fase, palette) {
-  const pal = palette || PALETTE_CAVALLO_DEFAULT;
-  const corpoL = r * 2.95;  // lunghezza corpo centrale (più raccolto)
-  const corpoW = r * 2.05;  // larghezza corpo centrale (meno massiccio, più snello)
-  const colloL = r * 1.15;  // collo leggermente allungato
-  const testaL = r * 1.45;  // testa più allungata (muso più definito)
-  const codaL  = r * 0.85;  // coda ancora più corta
-
-  // Falcata: due gruppi di zampe in fase opposta (anteriori/posteriori)
-  const fA = fase;
-  const fP = fase + Math.PI;
-  // Leggero "sobbalzo" della falcata (variazione di scala longitudinale,
-  // poiché la vista è dall'alto e non possiamo mostrare il salto verticale)
-  const sobbalzo = Math.sin(fase * 2) * 0.05;
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angolo);
-
-  // ── Ombra portata a terra (dà rilievo, corpo "sollevato" sulle zampe) ──
-  ctx.beginPath();
-  ctx.ellipse(r*0.15, r*0.28, corpoL*0.50, corpoW*0.48, 0, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(0,0,0,.30)';
-  ctx.fill();
-
-  // ── Zampe: forme piene e affusolate (non più semplici linee "a stecchino"),
-  // più larghe verso l'attacco al corpo e rastremate verso lo zoccolo, con
-  // una leggera flessione a metà (ginocchio) che simula il movimento del
-  // galoppo in modo più realistico ──
-  ctx.lineCap = 'round';
-  const disegnaZampa = (baseX, baseY, faseZampa) => {
-    const segno = Math.sign(baseY);
-    const estensione = Math.sin(faseZampa) * corpoL * 0.30;
-    const apertura = (Math.cos(faseZampa) * 0.5 + 0.5) * r * 0.55; // si allarga a metà falcata
-    const ginocchioX = baseX + estensione * 0.55;
-    const ginocchioY = baseY + segno * apertura * 0.32;
-    const zoccoloX = baseX + estensione;
-    const zoccoloY = baseY + segno * apertura * 0.6;
-
-    const wBase  = r * 1.00; // larga all'attacco (spalla/anca)
-    const wMed   = r * 0.62; // si assottiglia al "ginocchio"
-    const wPunta = r * 0.34; // stretta allo zoccolo, come una vera zampa
-
-    ctx.beginPath();
-    ctx.moveTo(baseX, baseY - wBase*0.5);
-    ctx.quadraticCurveTo(ginocchioX, ginocchioY - wMed*0.5, zoccoloX, zoccoloY - wPunta*0.5);
-    ctx.lineTo(zoccoloX, zoccoloY + wPunta*0.5);
-    ctx.quadraticCurveTo(ginocchioX, ginocchioY + wMed*0.5, baseX, baseY + wBase*0.5);
-    ctx.closePath();
-    const gradZampa = ctx.createLinearGradient(baseX, 0, zoccoloX, 0);
-    gradZampa.addColorStop(0, '#5a3a1e');
-    gradZampa.addColorStop(1, '#2c1a0d');
-    ctx.fillStyle = gradZampa;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = Math.max(0.4, r*0.03); ctx.stroke();
-
-    // Zoccolo: piccola capsula scura e lucida in punta
-    ctx.beginPath();
-    ctx.ellipse(zoccoloX, zoccoloY, r*0.22, r*0.16, 0, 0, Math.PI*2);
-    ctx.fillStyle = '#120a05';
-    ctx.fill();
-  };
-  // Anteriori (vicino al collo)
-  disegnaZampa(corpoL*0.30,  corpoW*0.34, fA);
-  disegnaZampa(corpoL*0.30, -corpoW*0.34, fA + 0.35);
-  // Posteriori (vicino alla coda)
-  disegnaZampa(-corpoL*0.28,  corpoW*0.34, fP);
-  disegnaZampa(-corpoL*0.28, -corpoW*0.34, fP + 0.35);
-
-  // ── Coda: corta e folta, oscilla lateralmente seguendo il movimento del corpo ──
-  const codaOsc = Math.sin(fase * 0.55) * r * 0.45;
-  ctx.beginPath();
-  ctx.moveTo(-corpoL*0.48, 0);
-  ctx.quadraticCurveTo(-corpoL*0.48 - codaL*0.55, codaOsc*0.55, -corpoL*0.48 - codaL, codaOsc);
-  ctx.strokeStyle = '#1e130a';
-  ctx.lineWidth = Math.max(2.0, r*0.62);
-  ctx.stroke();
-  // Ciuffo finale della coda (folto)
-  ctx.beginPath();
-  ctx.arc(-corpoL*0.48 - codaL, codaOsc, r*0.32, 0, Math.PI*2);
-  ctx.fillStyle = '#1e130a';
-  ctx.fill();
-
-  // ── Corpo centrale: leggera "respirazione" muscolare ──
-  const flexCorpo = 1 + sobbalzo;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, corpoL*0.5*flexCorpo, corpoW*0.5, 0, 0, Math.PI*2);
-  const gradCorpo = ctx.createLinearGradient(0, -corpoW*0.5, 0, corpoW*0.5);
-  gradCorpo.addColorStop(0,   pal.chiaro);
-  gradCorpo.addColorStop(0.5, pal.medio);
-  gradCorpo.addColorStop(1,   pal.scuro);
-  ctx.fillStyle = gradCorpo;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.40)'; ctx.lineWidth = 0.7; ctx.stroke();
-
-  // Linee del dorso muscolare: si flettono leggermente col ritmo del galoppo
-  ctx.strokeStyle = 'rgba(0,0,0,.16)';
-  ctx.lineWidth = Math.max(0.6, r*0.08);
-  [-1, 1].forEach(lato => {
-    ctx.beginPath();
-    ctx.moveTo(-corpoL*0.32, lato*corpoW*0.24);
-    ctx.quadraticCurveTo(0, lato*corpoW*0.24 + Math.sin(fase)*r*0.10, corpoL*0.32, lato*corpoW*0.24);
-    ctx.stroke();
-  });
-
-  // ── Collo: si protende in avanti con una leggera ondulazione ──
-  // Base del collo spostata più dentro il corpo per una giunzione morbida e continua
-  const oscCollo = Math.sin(fase * 0.55 + Math.PI/4) * r * 0.30;
-  const colloBaseX = corpoL*0.30;
-  const colloPuntaX = colloBaseX + colloL;
-  const colloPuntaY = oscCollo * 0.45;
-
-  // Raccordo garrese: piccola sella morbida che fonde corpo e collo senza soluzione di continuità
-  ctx.beginPath();
-  ctx.ellipse(colloBaseX, 0, corpoW*0.30, corpoW*0.42, 0, 0, Math.PI*2);
-  ctx.fillStyle = pal.colloA;
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(colloBaseX - r*0.3, -corpoW*0.30);
-  ctx.quadraticCurveTo(colloBaseX + colloL*0.5, -r*0.15 + oscCollo, colloPuntaX, colloPuntaY - r*0.55);
-  ctx.lineTo(colloPuntaX, colloPuntaY + r*0.55);
-  ctx.quadraticCurveTo(colloBaseX + colloL*0.5, r*0.15 + oscCollo, colloBaseX - r*0.3, corpoW*0.30);
-  ctx.closePath();
-  const gradCollo = ctx.createLinearGradient(colloBaseX, 0, colloPuntaX, 0);
-  gradCollo.addColorStop(0, pal.colloA);
-  gradCollo.addColorStop(1, pal.colloB);
-  ctx.fillStyle = gradCollo;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.40)'; ctx.lineWidth = 0.7; ctx.stroke();
-
-  // Criniera: banda continua e uniforme che corre centrata sulla linea
-  // dorsale del collo (non più spostata lateralmente su un solo lato),
-  // simmetrica rispetto all'asse del collo, con bordo morbido e
-  // oscillazione leggera e regolare
-  const nCrin = 10;
-  const centroCrin = [];
-  const bordoSupCrin = [];
-  const bordoInfCrin = [];
-  for (let i = 0; i <= nCrin; i++) {
-    const t = i / nCrin;
-    const cx = colloBaseX + (colloPuntaX - colloBaseX) * t;
-    const cy = oscCollo * t * 0.8; // centrata sull'asse del collo
-    const sventola = Math.sin(fase * 1.2 + t * 1.8) * r * 0.08; // ondulazione più regolare
-    const spessore = r * 0.34 * (1 - t * 0.30); // si assottiglia dolcemente verso la testa
-    centroCrin.push({ x: cx, y: cy });
-    bordoSupCrin.push({ x: cx + sventola*0.25, y: cy - spessore + sventola });
-    bordoInfCrin.push({ x: cx + sventola*0.25, y: cy + spessore + sventola });
-  }
-  ctx.beginPath();
-  ctx.moveTo(bordoSupCrin[0].x, bordoSupCrin[0].y);
-  for (let i = 1; i < bordoSupCrin.length; i++) {
-    const p0 = bordoSupCrin[i-1], p1 = bordoSupCrin[i];
-    ctx.quadraticCurveTo(p0.x, p0.y, (p0.x+p1.x)/2, (p0.y+p1.y)/2);
-  }
-  ctx.lineTo(bordoSupCrin[bordoSupCrin.length-1].x, bordoSupCrin[bordoSupCrin.length-1].y);
-  ctx.lineTo(bordoInfCrin[bordoInfCrin.length-1].x, bordoInfCrin[bordoInfCrin.length-1].y);
-  for (let i = bordoInfCrin.length - 2; i >= 0; i--) {
-    const p0 = bordoInfCrin[i+1], p1 = bordoInfCrin[i];
-    ctx.quadraticCurveTo(p0.x, p0.y, (p0.x+p1.x)/2, (p0.y+p1.y)/2);
-  }
-  ctx.lineTo(bordoInfCrin[0].x, bordoInfCrin[0].y);
-  ctx.closePath();
-  const gradCrin = ctx.createLinearGradient(colloBaseX, 0, colloPuntaX, 0);
-  gradCrin.addColorStop(0, '#241509');
-  gradCrin.addColorStop(1, '#160d06');
-  ctx.fillStyle = gradCrin;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.30)'; ctx.lineWidth = 0.6; ctx.stroke();
-
-  // ── Testa: forma affusolata con muso ben definito, sovrapposta al collo
-  // per un attacco morbido e continuo (nessuna cesura visibile) ──
-  const testaBaseX = colloPuntaX - testaL*0.30;
-  const testaBaseY = colloPuntaY;
-  const testaPuntaX = testaBaseX + testaL;
-  ctx.beginPath();
-  ctx.moveTo(testaBaseX, testaBaseY - r*0.56);
-  ctx.quadraticCurveTo(testaBaseX + testaL*0.58, testaBaseY - r*0.48, testaPuntaX, testaBaseY - r*0.13);
-  ctx.quadraticCurveTo(testaPuntaX + r*0.14, testaBaseY, testaPuntaX, testaBaseY + r*0.13);
-  ctx.quadraticCurveTo(testaBaseX + testaL*0.58, testaBaseY + r*0.48, testaBaseX, testaBaseY + r*0.56);
-  ctx.closePath();
-  const gradTesta = ctx.createLinearGradient(testaBaseX, 0, testaPuntaX, 0);
-  gradTesta.addColorStop(0, pal.testaA);
-  gradTesta.addColorStop(1, pal.testaB);
-  ctx.fillStyle = gradTesta;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.40)'; ctx.lineWidth = 0.7; ctx.stroke();
-
-  // Profilo del muso (linea del labbro/mascella)
-  ctx.beginPath();
-  ctx.moveTo(testaBaseX + testaL*0.35, testaBaseY - r*0.30);
-  ctx.quadraticCurveTo(testaBaseX + testaL*0.80, testaBaseY - r*0.10, testaPuntaX - r*0.05, testaBaseY);
-  ctx.strokeStyle = 'rgba(0,0,0,.22)';
-  ctx.lineWidth = Math.max(0.6, r*0.06);
-  ctx.stroke();
-
-  // Narice
-  ctx.beginPath();
-  ctx.ellipse(testaPuntaX - r*0.16, testaBaseY + r*0.10, r*0.10, r*0.06, 0.4, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(0,0,0,.5)';
-  ctx.fill();
-
-  // Orecchie: forma a "petalo" morbida e simmetrica, base solida e punta
-  // arrotondata (non più spigolosa/a triangolo), con leggera ombreggiatura
-  // interna che dà volume; ben piantate sulla nuca, in leggero movimento
-  const orecchioMov = Math.sin(fase * 1.6) * 0.07;
-  const orBaseX = testaBaseX + testaL*0.07;
-  [1, -1].forEach(lato => {
-    const baseY = testaBaseY + lato*r*0.28;
-    const tipX  = orBaseX + testaL*0.06;
-    const tipY  = testaBaseY + lato*(r*0.90 + orecchioMov*r);
-    const outX  = orBaseX - testaL*0.05;   // controllo bordo esterno (dorso dell'orecchio)
-    const outY  = testaBaseY + lato*r*0.64;
-    const inX   = orBaseX + testaL*0.13;   // controllo bordo interno (pancia dell'orecchio)
-    const inY   = testaBaseY + lato*r*0.48;
-
-    ctx.beginPath();
-    ctx.moveTo(orBaseX - testaL*0.02, baseY);
-    ctx.quadraticCurveTo(outX, outY, tipX, tipY);
-    ctx.quadraticCurveTo(inX, inY, orBaseX + testaL*0.09, baseY);
-    ctx.closePath();
-    const gradOr = ctx.createLinearGradient(orBaseX, testaBaseY, tipX, tipY);
-    gradOr.addColorStop(0, '#4a2c14');
-    gradOr.addColorStop(1, '#241509');
-    ctx.fillStyle = gradOr;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = Math.max(0.4, r*0.03); ctx.stroke();
-
-    // Interno orecchio: forma più piccola e sfumata, per dare profondità
-    ctx.beginPath();
-    ctx.moveTo(orBaseX + testaL*0.01, baseY - lato*r*0.02);
-    ctx.quadraticCurveTo(orBaseX + testaL*0.005, testaBaseY + lato*r*0.52,
-                          orBaseX + testaL*0.04, testaBaseY + lato*(r*0.70 + orecchioMov*r));
-    ctx.quadraticCurveTo(orBaseX + testaL*0.085, testaBaseY + lato*r*0.52,
-                          orBaseX + testaL*0.065, baseY - lato*r*0.02);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0,0,0,.30)';
-    ctx.fill();
-  });
-
-  ctx.restore();
-
-  // ── Il fantino: pallino coi colori della contrada, sopra il centro del corpo ──
-  // (disegnato fuori dalla rotazione, così i colori araldici restano sempre dritti e leggibili)
-  disegnaPallinoPalio(ctx, x, y, r, nomeCon);
-}
 
 /* ─────────────────────────────────────────────
    PERCORSO REALE PIAZZA DEL CAMPO
@@ -3266,17 +2846,18 @@ function posizioneConScarto(percorso, fraz, offsetLat, segnoNormale) {
 // verso il centro. `s` è window._palioAnimState, `dtMs` il delta-tempo
 // del frame in millisecondi.
 function aggiornaSorpassi(s, dtMs) {
-  const margineBordo = s.bandW * 0.18;            // non arrivare a toccare i bordi
+  const lista = s.contrade.filter(nc => !(s.nascosti && s.nascosti[nc]));   // i cavalli caduti e usciti di scena non contano più
+  const margineBordo = s.bandW * 0.08;            // non arrivare a toccare i bordi (margine ridotto: più spazio per stare affiancati senza sovrapporsi)
   const semiLarghezza = s.bandW/2 - margineBordo;  // scostamento massimo consentito
   const sogliaGap = 0.032;                         // reagisce prima (era 0.018): più tempo per completare la sterzata
   const sogliaLaterale = s.bandW * 0.30;           // sotto questa distanza laterale, rischio sovrapposizione
   const sogliaCongestione = 0.032;                 // raggio, attorno al cavallo da sorpassare, entro cui contare chi occupa già un lato
   const velManovra = s.bandW * 1.3;                // sterzata più reattiva (era 0.9): completa lo scarto in meno tempo
 
-  s.contrade.forEach(nc => {
+  lista.forEach(nc => {
     // Trova il cavallo immediatamente davanti (progresso maggiore, gap minimo)
     let davanti = null, gapMin = Infinity;
-    s.contrade.forEach(altro => {
+    lista.forEach(altro => {
       if (altro === nc) return;
       const gap = (s.progresso[altro]||0) - (s.progresso[nc]||0);
       if (gap > 0 && gap < gapMin) { gapMin = gap; davanti = altro; }
@@ -3291,7 +2872,7 @@ function aggiornaSorpassi(s, dtMs) {
         // stesso cavallo davanti si "vedono" a vicenda anche se non sono
         // vicini tra loro, ed evitano di scegliere entrambi lo stesso lato.
         let occInterno = 0, occEsterno = 0;
-        s.contrade.forEach(altro => {
+        lista.forEach(altro => {
           if (altro === nc) return;
           const gapAltro = Math.abs((s.progresso[altro]||0) - (s.progresso[davanti]||0));
           if (gapAltro < sogliaCongestione) {
@@ -3332,21 +2913,27 @@ function aggiornaSorpassi(s, dtMs) {
   // di ogni coppia ancora troppo vicina — sia in avanzamento che
   // lateralmente — così due cavalli non restano mai uno sopra l'altro,
   // indipendentemente da quanti sono ammassati insieme.
-  const distMinimaVisiva = s.bandW * 0.24;    // ~ingombro laterale di due cavalli affiancati
-  const distProgressoRischio = 0.010;         // sotto questa distanza (in giri) sono troppo vicini longitudinalmente
+  // Ingombro reale di un cavallo (vista dall'alto): ~3,9 r in lunghezza, ~2 r in larghezza con le zampe.
+  // Due cavalli si sovrappongono se cadono l'uno nell'ellisse d'ingombro dell'altro: la separazione
+  // laterale richiesta dipende da quanto sono vicini lungo la pista (a pari altezza serve tutta la larghezza).
+  const rCav = Math.max(4, s.W * 0.016);
+  if (!s._Lpista) s._Lpista = lunghezzaPercorso(s.percorso);
+  const semiLung = rCav * 1.95, semiLarg = rCav * 1.05;     // semi-assi dell'ingombro di un cavallo
   const idx = {};
-  s.contrade.forEach((nc, i) => { idx[nc] = i; });
+  lista.forEach((nc, i) => { idx[nc] = i; });
 
-  for (let iter = 0; iter < 3; iter++) {      // un paio di passate bastano a stabilizzare anche gruppi di 3-4
-    s.contrade.forEach(nc => {
-      s.contrade.forEach(altro => {
+  for (let iter = 0; iter < 6; iter++) {      // più passate: stabilizzano anche gruppi ammassati di 4-5 cavalli
+    lista.forEach(nc => {
+      lista.forEach(altro => {
         if (altro === nc) return;
         const dProg = Math.abs((s.progresso[altro]||0) - (s.progresso[nc]||0));
-        if (dProg >= distProgressoRischio) return;
+        const fN = dProg * s._Lpista / (2*semiLung);        // distanza lungo la pista, normalizzata sull'ingombro
+        if (fN >= 1) return;
         const oNc = s.offsetLat[nc] || 0;
         const oAltro = s.offsetLat[altro] || 0;
         const dLat = oNc - oAltro;
-        const overlap = distMinimaVisiva - Math.abs(dLat);
+        const richiesta = 2*semiLarg * Math.sqrt(1 - fN*fN); // separazione laterale minima per non toccarsi
+        const overlap = richiesta - Math.abs(dLat);
         if (overlap <= 0) return;
         // Se sono esattamente allineati (dLat=0), rompi la simmetria in modo
         // deterministico usando l'ordine delle contrade, così non "tremano"
@@ -4907,6 +4494,81 @@ function disegnaPistaBase(ctx, percorso, W, H, dati) {
 }
 
 
+/* ─────────────────────────────────────────────
+   AGGANCIO DELLE ANIMAZIONI DI cavallo_codice.js ALLA CORSA DEL PALIO
+   Le zone sono espresse come frazione del giro (0 = Mossa/traguardo, senso di marcia),
+   ricavate dai riquadri disegnati sullo screenshot della pista.
+   • ZONE_CADUTA_PALIO  (verdi): le uniche in cui può avvenire una caduta (San Martino / Casato)
+   • ZONA_VITTORIA_PALIO (rossa): tratto che precede il traguardo; la contrada che vi entra per
+     prima nell'ULTIMO giro festeggia col nerbo alzato
+───────────────────────────────────────────── */
+/* Durata (ms reali) dei 3 giri per il cavallo in testa: più è alto, più lenti corrono tutti i cavalli.
+   Prima era 28000 (troppo veloce): 45000 = circa 15 secondi a giro. */
+/* Distanza (in giri) fra un cavallo e il successivo nella griglia di partenza: abbastanza ampia
+   perché i cavalli non partano uno sopra l'altro (prima 0.008). */
+const PASSO_GRIGLIA_PARTENZA = 0.014;
+const DURATA_CORSA_MS = 45000;
+const ZONE_CADUTA_PALIO  = [ { ini: 0.492, fin: 0.569 },    // uscita di San Martino / inizio rettilineo inferiore
+                             { ini: 0.820, fin: 0.880 } ];  // curva del Casato
+const ZONA_VITTORIA_PALIO = { ini: 0.955, fin: 1.0 };
+
+/* Prepara, per ogni contrada, l'eventuale caduta: dove e quando (giro + frazione di giro).
+   - esiti.scosso  → cade il fantino, il cavallo prosegue scosso
+   - esiti.caduta  → cadono cavallo e fantino, la contrada esce dalla simulazione grafica
+   Il giro viene dai dati della simulazione (giroScosso / classificaGiri[].caduta). */
+function pianificaEventiCorsa(st) {
+  st.eventi = {}; st.nascosti = {}; st.affianc = {}; st.vel = {}; st.vittoria = null;
+  const esiti = (st.corsa && st.corsa.esiti) || {};
+  st.contrade.forEach(nc => {
+    const es = esiti[nc];
+    if (!es) return;
+    let tipo = null, giro = null;
+    if (es.scosso) {
+      tipo = 'scosso';
+      if (Number.isInteger(es.giroScosso)) giro = es.giroScosso;
+    } else if (es.caduta) {
+      tipo = 'cavallo';
+      const g = (st.classificaGiri || []).findIndex(lap => { const e = lap.find(x => x.nomeContrada === nc); return e && e.caduta; });
+      if (g >= 0) giro = g;
+    }
+    if (!tipo) return;
+    if (giro == null) giro = Math.floor(Math.random() * st.totalGiri);          // dato mancante (vecchi salvataggi)
+    giro = Math.max(0, Math.min(st.totalGiri - 1, giro));
+    const z = ZONE_CADUTA_PALIO[Math.floor(Math.random() * ZONE_CADUTA_PALIO.length)];
+    const fraz = z.ini + (z.fin - z.ini) * (0.15 + 0.50 * Math.random());      // punto di partenza dentro la zona verde
+    st.eventi[nc] = { tipo, soglia: giro + fraz, avviato: false, t0: 0 };
+  });
+}
+
+/* Rileva le contrade affiancate. Per ognuna cerca un rivale vicino lungo la marcia e a lato:
+   rivale a DESTRA → nerbata a destra; rivale a SINISTRA → presa della giubba a sinistra.
+   Le due animazioni entrano ed escono gradualmente (w da 0 a 1). Solo cavalli col fantino in sella. */
+function aggiornaAffiancamenti(st, attivi, posXY, ang, r, dtS) {
+  const FMAX = r * 2.4, LMIN = r * 0.7, LMAX = r * 4.2, ISTERESI = 1.4;
+  attivi.forEach(nc => {
+    const p = posXY[nc], c = Math.cos(ang[nc]), s = Math.sin(ang[nc]);
+    const a = st.affianc[nc] || (st.affianc[nc] = { tipo: null, w: 0, rival: null });
+    let best = null, bestF = Infinity;
+    attivi.forEach(alt => {
+      if (alt === nc) return;
+      const q = posXY[alt], dx = q.x - p.x, dy = q.y - p.y;
+      const f = dx * c + dy * s, l = -dx * s + dy * c;                      // l > 0 = lato destro del cavallo
+      const k = (a.w > 0 && a.rival === alt) ? ISTERESI : 1;                // isteresi: non "sfarfalla" al limite
+      if (Math.abs(f) < FMAX * k && Math.abs(l) > LMIN / k && Math.abs(l) < LMAX * k && Math.abs(f) < bestF) {
+        bestF = Math.abs(f); best = { alt, tipo: l > 0 ? 'dx' : 'sx' };
+      }
+    });
+    const voluto = best ? best.tipo : null;
+    let target;
+    if (voluto === a.tipo) target = voluto ? 1 : 0;
+    else if (a.w > 0.001) target = 0;                                       // prima esce dall'azione in corso...
+    else { a.tipo = voluto; target = voluto ? 1 : 0; }                      // ...poi parte quella nuova
+    if (best) a.rival = best.alt;
+    a.w = target > a.w ? Math.min(1, a.w + dtS / 0.9) : Math.max(0, a.w - dtS / 0.6);
+    if (a.w === 0 && !voluto) a.tipo = null;
+  });
+}
+
 function disegnaFramePalio() {
   const st = window._palioAnimState;
   if (!st) return;
@@ -4940,19 +4602,59 @@ function disegnaFramePalio() {
   // più rapidamente, e i cavalli fermi al traguardo restano immobili.
   const FREQ_GALOPPO = 46;
 
-  // Disegna i cavalli (il giocatore sopra tutti)
-  const ordineDisegno = [...contrade.filter(n => n !== nGiocatore), nGiocatore];
-  ordineDisegno.forEach(nc => {
-    const pt = posXY[nc];
-    if (!pt) return;
-    const isMe = nc === nGiocatore;
+  if (!st.eventi) { st.eventi = {}; st.nascosti = {}; st.affianc = {}; st.vel = {}; st.vittoria = null; }
+  if (!st.Lpx) st.Lpx = lunghezzaPercorso(percorso);
+  const tNow = performance.now() / 1000;
+  const dtS = Math.min(0.1, st._tPrec ? tNow - st._tPrec : 0.016); st._tPrec = tNow;
+
+  // ── Pre-passata: angolo, fase, velocità, avvio delle cadute, vincitore, contrade affiancate ──
+  const ang = {}, fasi = {}, cums = {};
+  contrade.forEach(nc => {
     const cum = st.progresso[nc] || 0;
     const fraz = cum >= st.totalGiri ? 0 : ((cum % 1) + 1) % 1;
-    const angolo = angoloAlPercorso(percorso, fraz);
-    const fase = cum * FREQ_GALOPPO;
+    cums[nc] = cum; ang[nc] = angoloAlPercorso(percorso, fraz); fasi[nc] = cum * FREQ_GALOPPO;
+    // velocità del cavallo in px/s (serve alle cadute)
+    const v = st.vel[nc] || (st.vel[nc] = { cum, t: tNow, v: 0 });
+    if (tNow - v.t > 0.03) { const inst = Math.max(0, (cum - v.cum) / (tNow - v.t)); v.v = v.v ? v.v * 0.7 + inst * 0.3 : inst; v.cum = cum; v.t = tNow; }
+    // la caduta parte quando il cavallo entra nel punto stabilito della zona verde
+    const ev = st.eventi[nc];
+    if (ev && !ev.avviato && !ev.saltato && st.fase === 'fine') ev.saltato = true;   // corsa già finita senza che il cavallo sia passato dal punto: niente caduta
+    if (ev && !ev.avviato && !ev.saltato && cum >= ev.soglia) {
+      ev.avviato = true; ev.t0 = tNow;
+      const v0 = v.v * st.Lpx;
+      if (ev.tipo === 'scosso') ev.caduta = creaCadutaFantino(nc, v0);
+      else { ev.caduta = creaCadutaCavallo(nc, v0); ev.x0 = posXY[nc].x; ev.y0 = posXY[nc].y; ev.ang0 = ang[nc]; ev.fase0 = fasi[nc]; ev.v0 = v0; }
+    }
+  });
+  const senzaFantino = nc => { const ev = st.eventi[nc]; return !!(ev && ev.avviato); };   // sbalzato (fantino o cavallo+fantino)
+
+  // Vittoria: la prima contrada (col fantino in sella) che entra nella zona rossa nell'ULTIMO giro
+  if (!st.vittoria) {
+    const cand = contrade.filter(nc => !st.nascosti[nc] && !senzaFantino(nc) && cums[nc] >= st.totalGiri - 1 + ZONA_VITTORIA_PALIO.ini)
+                         .sort((a, b) => cums[b] - cums[a]);
+    if (cand.length) st.vittoria = { nc: cand[0], t0: tNow, tFin: null };
+  }
+
+  // Sorpasso a destra / presa della giubba a sinistra: solo fra cavalli col fantino in sella, ancora in corsa
+  const attivi = contrade.filter(nc => !st.nascosti[nc] && !senzaFantino(nc) && cums[nc] < st.totalGiri
+                                       && !(st.vittoria && st.vittoria.nc === nc));
+  aggiornaAffiancamenti(st, attivi, posXY, ang, r, dtS);
+
+  // Disegna i cavalli (il giocatore sopra tutti; i fantini rimasti a terra sotto gli altri)
+  const peso = nc => (nc === nGiocatore ? 2 : 0) + ((st.eventi[nc] && st.eventi[nc].tipo === 'scosso' && st.eventi[nc].avviato && (tNow - st.eventi[nc].t0) <= 4 + parametriCadutaFantino(nc).tSlip + parametriCadutaFantino(nc).tFly) ? -1 : 1);
+  const ordineDisegno = contrade.slice().sort((a, b) => peso(a) - peso(b));
+  ordineDisegno.forEach(nc => {
+    const pt = posXY[nc];
+    if (!pt || st.nascosti[nc]) return;
+    const isMe = nc === nGiocatore;
+    const cum = cums[nc];
+    const angolo = ang[nc];
+    let fase = fasi[nc];
+    const pal = st.paletteCavalli && st.paletteCavalli[nc];
+    const ev = st.eventi[nc];
 
     // Alone per il cavallo del giocatore, orientato come il cavallo
-    if (isMe) {
+    if (isMe && !(ev && ev.tipo === 'cavallo' && ev.avviato)) {
       ctx.save();
       ctx.translate(pt.x, pt.y);
       ctx.rotate(angolo);
@@ -4962,7 +4664,57 @@ function disegnaFramePalio() {
       ctx.fill();
       ctx.restore();
     }
-    disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, st.paletteCavalli && st.paletteCavalli[nc]);
+
+    // ── Caduta del fantino: il cavallo prosegue scosso, il fantino resta a terra ──
+    if (ev && ev.avviato && ev.tipo === 'scosso') {
+      const t = tNow - ev.t0, pf = parametriCadutaFantino(nc);
+      if (t > pf.tSlip + pf.tFly + 4/pf.k2) {                              // fine animazione: il fantino viene tolto dalla pista
+        const idx = indiceContradaCaduta(nc);
+        disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, pal,
+                            { scosso: true, vivacita: 0.85 + ((idx*7) % 5)*0.075, sfas: idx*1.3 });
+      } else {
+        disegnaCadutaFantino(ctx, pt.x, pt.y, r, nc, angolo, fase, pal, ev.caduta, t);
+      }
+      return;
+    }
+    // ── Caduta del cavallo con fantino: cadono insieme, poi escono di scena ──
+    if (ev && ev.avviato && ev.tipo === 'cavallo') {
+      const t = tNow - ev.t0, pc = parametriCadutaCavallo(nc);
+      const dur = Math.max(0.5*pc.tInc + pc.tCad + 3/pc.kH, pc.tSep + pc.tFly + 4/pc.k2);
+      const FADE = 0.8;
+      if (t > dur + FADE) { st.nascosti[nc] = true; return; }            // non si vede più nella simulazione grafica
+      const x = ev.x0 + Math.cos(ev.ang0) * ev.v0 * t, y = ev.y0 + Math.sin(ev.ang0) * ev.v0 * t;
+      ctx.save();
+      if (t > dur) ctx.globalAlpha = Math.max(0, 1 - (t - dur) / FADE);
+      disegnaCadutaCavallo(ctx, x, y, r, nc, ev.ang0, ev.fase0, pal, ev.caduta, t);
+      ctx.restore();
+      return;
+    }
+    // ── Cavallo che avrebbe dovuto cadere ma la corsa è già finita: esce di scena ──
+    if (ev && ev.saltato && ev.tipo === 'cavallo') { st.nascosti[nc] = true; return; }
+    if (ev && ev.saltato) {                                              // scosso "saltato": arriva comunque senza fantino
+      disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, pal, { scosso: true });
+      return;
+    }
+
+    // ── Vittoria: nerbo alzato nell'ultimo giro, dalla zona rossa in poi ──
+    if (st.vittoria && st.vittoria.nc === nc) {
+      if (cum >= st.totalGiri) {                                           // fermo al traguardo: scalpita e sventola sul posto
+        if (st.vittoria.tFin == null) st.vittoria.tFin = tNow;
+        fase += (tNow - st.vittoria.tFin) * 7;
+      }
+      const u = Math.min(1, (tNow - st.vittoria.t0) / 1.2);
+      disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, pal, { vittoria: { w: u * u * (3 - 2*u) } });
+      return;
+    }
+    // ── Affiancati: nerbata a destra (rivale a destra) / presa della giubba a sinistra (rivale a sinistra) ──
+    const af = st.affianc[nc];
+    if (af && af.w > 0.001 && af.tipo) {
+      disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, pal,
+                          af.tipo === 'dx' ? { sorpasso: { w: af.w } } : { afferra: { w: af.w } });
+      return;
+    }
+    disegnaCavalloPalio(ctx, pt.x, pt.y, r, nc, angolo, fase, pal);
   });
 
   // Il bandierino va ridisegnato in primo piano, SOPRA i cavalli: nella realtà sta sul bordo
@@ -4988,11 +4740,13 @@ window.avviaSimulazionePalio = function() {
   // Progressi cumulativi: 0 = inizio, 3.0 = fine (3 giri completi)
   // Inizializza con piccolo offset per l'ordine al canapo
   st.contrade.forEach((nc,i)=>{
-    st.progresso[nc] = -i*0.008;
+    st.progresso[nc] = -i*PASSO_GRIGLIA_PARTENZA;
     st.offsetLat[nc] = 0;
     st.offsetTarget[nc] = 0;
     st.latoSorpasso[nc] = null;
   });
+
+  pianificaEventiCorsa(st);   // cadute (zone verdi), vittoria (zona rossa), affiancamenti: animazioni di cavallo_codice.js
 
   /* FIX: l'animazione è guidata dai TEMPI UFFICIALI della simulazione (classificaGiri),
      non più da velocità casuali basate sul piazzamento. Per ogni contrada costruiamo i
@@ -5088,7 +4842,7 @@ window.avviaSimulazionePalio = function() {
     st.pendenza[nc] = m;
   });
   const tMin = Math.min(...st.contrade.map(nc => st.checkpoint[nc][st.totalGiri]));
-  st.msSimPerMsReale = tMin / 28000;
+  st.msSimPerMsReale = tMin / DURATA_CORSA_MS;   // il primo taglia il traguardo dopo ~DURATA_CORSA_MS ms reali
   st.tMin = tMin;
   st.tMax = Math.max(...st.contrade.map(nc => st.checkpoint[nc][st.totalGiri]));
   st.tempoAnim = 0; // tempo simulato trascorso (stesse unità dei tempi ufficiali)
@@ -5134,7 +4888,7 @@ window.avviaSimulazionePalio = function() {
     const i = st.contrade.indexOf(nc);
     if (prog < 0.5) {                                          // scarto che svanisce con pendenza nulla agli estremi
       const x = Math.max(0, prog) / 0.5;
-      prog -= i * 0.008 * (1 - x*x*(3 - 2*x));
+      prog -= i * PASSO_GRIGLIA_PARTENZA * (1 - x*x*(3 - 2*x));
     }
     return prog;
   }
@@ -15200,26 +14954,6 @@ function disegnaMossiereCanapo(ctx, cx, cy, angolo, u){
   ctx.fillStyle = '#0d0d11'; ctx.beginPath(); ctx.arc(-0.02*u,0,u*0.38,0,Math.PI*2); ctx.fill();
   ctx.strokeStyle = 'rgba(200,190,170,.45)'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.arc(-0.02*u,0,u*0.22,0,Math.PI*2); ctx.stroke();
   ctx.restore();
-}
-
-/* Un cavallo "vivo" al canapo: non è mai fermo, oscilla di poco a destra e a
-   sinistra e avanti e indietro rispetto alla propria posizione assegnata (con le
-   zampe che scalpitano sul posto), ma l'angolo di marcia resta sempre lo stesso
-   (testa rivolta verso il centro della pista): non si gira mai, e non supera
-   mai il limite della barriera (c.limiteX). Riusa esattamente
-   disegnaCavalloPalio, la stessa funzione della corsa vera, quindi anche lo
-   stemma di contrada sopra il cavallo (disegnaPallinoPalio) è identico. */
-function disegnaCavalloAlCanapo(ctx, c, t, r, paletteMap){
-  const along = { x: Math.cos(c.angolo), y: Math.sin(c.angolo) };
-  const perp  = { x: -Math.sin(c.angolo), y: Math.cos(c.angolo) };
-  const lat  = Math.sin(t*c.fLat*Math.PI*2  + c.pLat)  * r*0.42; // destra-sinistra
-  const lung = Math.sin(t*c.fLong*Math.PI*2 + c.pLong) * r*0.58; // avanti-indietro
-  let x = c.x + along.x*lung + perp.x*lat;
-  let y = c.y + along.y*lung + perp.y*lat;
-  if (typeof c.limiteX === 'number' && x > c.limiteX) x = c.limiteX; // mai oltre la barriera
-  const fase = t*2.4 + c.pGal; // zampe che scalpitano sul posto
-  const palette = (c.nomeCon && paletteMap && paletteMap[c.nomeCon]) || null;
-  disegnaCavalloPalio(ctx, x, y, r, c.nomeCon, c.angolo, fase, palette);
 }
 
 function disegnaScenaCanapoMossa(S, t){
