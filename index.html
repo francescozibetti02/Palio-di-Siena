@@ -2420,7 +2420,7 @@ function preparaCorsaPalio(tipoPalio) {
     // Simula 3 giri separati per costruire una classifica progressiva
     const giri = [];
     let tempoCumulativo = 0;
-    const statoScosso = { scosso:false };   // scosso = cavallo senza fantino: lo resta fino al traguardo
+    const statoScosso = { scosso:false, imprevisto: estraiImprevistoPalio() };   // scosso = cavallo senza fantino: lo resta fino al traguardo
     let esitoCaduto = false;
     for (let g = 0; g < NUM_GIRI_PALIO; g++) {
       // Override temporaneo del numero di giri
@@ -2565,7 +2565,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
   const tempiGiri = coppie.map(cp => {
     const giri = [];
     let tempoCumulativo = 0;
-    const statoScosso = { scosso:false };   // scosso = cavallo senza fantino: lo resta fino al traguardo
+    const statoScosso = { scosso:false, imprevisto: estraiImprevistoPalio() };   // scosso = cavallo senza fantino: lo resta fino al traguardo
     let esitoCaduto = false;
     for (let g = 0; g < NUM_GIRI_PALIO; g++) {
       const res = simulaGiroSingoloPalio(cp.cavallo, cp.fantino, PISTA_CAMPO, g, tempoCumulativo, cp.isMe ? bonusMossa : 1, statoScosso);
@@ -2616,6 +2616,15 @@ function preparaCorsaPalioFantino(tipoPalio) {
    È una versione ridotta di simulaCorsaCoppia che fa girare il loop solo 1 volta.
    bonusVelocitaMossa: moltiplicatore opzionale dal minigioco della Mossa (1 = nessun effetto,
    usato dalla Carriera Fantino; la Carriera Capitano non lo passa mai, quindi resta 1). */
+/* Imprevisto casuale del Palio, valido per OGNI contrada (giocatore incluso) e in entrambe le
+   carriere, in aggiunta al rischio di scossa/caduta già calcolato dalle statistiche:
+   20% cade · 20% resta scosso · 60% nessun imprevisto aggiuntivo. Il giro in cui accade è casuale. */
+function estraiImprevistoPalio() {
+  const r = Math.random();
+  const tipo = r < 0.20 ? 'caduta' : (r < 0.40 ? 'scosso' : null);
+  return tipo ? { tipo, giro: Math.floor(Math.random() * NUM_GIRI_PALIO), fatto: false } : null;
+}
+
 function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPrecedente, bonusVelocitaMossa, statoScosso) {
   bonusVelocitaMossa = bonusVelocitaMossa || 1;
   /* statoScosso: oggetto {scosso:bool} che il chiamante conserva tra un giro e l'altro della
@@ -2649,6 +2658,18 @@ function simulaGiroSingoloPalio(cavallo, fantino, pista, numeroGiro, tempoPreced
           statoScosso.scosso = true;
           if (statoScosso.giro == null) statoScosso.giro = numeroGiro;   // giro in cui il fantino cade (per l'animazione)
           ({ resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, true));
+        }
+        // Imprevisto casuale (20% caduta / 20% scosso) nel giro estratto, alla prima curva
+        const imp = statoScosso.imprevisto;
+        if(imp && !imp.fatto && imp.giro === numeroGiro){
+          imp.fatto = true;
+          if(imp.tipo === 'caduta'){ caduta = true; break; }
+          if(!scosso){
+            scosso = true;
+            statoScosso.scosso = true;
+            if (statoScosso.giro == null) statoScosso.giro = numeroGiro;
+            ({ resistenzaEff, velocitaMax, accelerazione, tenutaCurvaEff } = parametriCorsaScosso(cavallo, fantino, bonusVelocitaMossa, true));
+          }
         }
         const fattoreCurva = Math.min(1.0, 0.45 + tenutaCurvaEff*0.09) / seg.severita;
         vTarget = velocitaMax * fattoreCurva;
@@ -4630,7 +4651,17 @@ function disegnaFramePalio() {
 
   // Vittoria: la prima contrada (col fantino in sella) che entra nella zona rossa nell'ULTIMO giro
   if (!st.vittoria) {
-    const cand = contrade.filter(nc => !st.nascosti[nc] && !senzaFantino(nc) && cums[nc] >= st.totalGiri - 1 + ZONA_VITTORIA_PALIO.ini)
+    // Un cavallo scosso (o caduto) non festeggia mai: niente nerbo alzato. Se a vincere è un
+    // cavallo scosso, l'animazione di vittoria viene disattivata del tutto (nc nullo), così non
+    // la fa nessun altro al suo posto.
+    const esitiV = (st.corsa && st.corsa.esiti) || {};
+    const conImprevisto = nc => !!(esitiV[nc] && (esitiV[nc].scosso || esitiV[nc].caduta));
+    const vincUff = st.classificaFinale && st.classificaFinale[0];
+    if (vincUff && conImprevisto(vincUff)) st.vittoria = { nc: null, t0: tNow, tFin: null };
+  }
+  if (!st.vittoria) {
+    const esitiV2 = (st.corsa && st.corsa.esiti) || {};
+    const cand = contrade.filter(nc => !(esitiV2[nc] && (esitiV2[nc].scosso || esitiV2[nc].caduta)) && !st.nascosti[nc] && !senzaFantino(nc) && cums[nc] >= st.totalGiri - 1 + ZONA_VITTORIA_PALIO.ini)
                          .sort((a, b) => cums[b] - cums[a]);
     if (cand.length) st.vittoria = { nc: cand[0], t0: tNow, tFin: null };
   }
@@ -4799,7 +4830,13 @@ window.avviaSimulazionePalio = function() {
      (rank + distacco del cavallo che prende il suo posto), quindi resta strettamente
      crescente con la posizione e nessun cavallo torna mai indietro. */
   const vincitoreUfficiale = st.classificaFinale && st.classificaFinale[0];
-  const copriVincitore = nCon >= 4 && st.totalGiri >= 3 && st.contrade.includes(vincitoreUfficiale);
+  const vincitoreValido = nCon >= 4 && st.totalGiri >= 3 && st.contrade.includes(vincitoreUfficiale);
+  /* Due stili di corsa, scelti a caso a ogni Palio (valido per capitano e fantino):
+     · 60% "rimonta": il vincitore parte dal gruppo e rimonta nell'ultimo giro (logica sopra);
+     · 40% "al comando": il vincitore sta in 1ª-4ª posizione fin dal primo giro (sorpassi e
+       controsorpassi restano possibili grazie alle onde casuali a metà giro). */
+  const copriVincitore = vincitoreValido && Math.random() < 0.6;
+  const vincitoreAlComando = vincitoreValido && !copriVincitore;
   const rankBersaglio = [
     Math.floor(nCon * 0.3) + Math.floor(Math.random() * (Math.floor(nCon * 0.6) - Math.floor(nCon * 0.3) + 1)),  // fine giro 1: metà gruppo
     1 + Math.floor(Math.random() * 2)                                                                             // fine giro 2: 2ª-3ª posizione
@@ -4809,7 +4846,15 @@ window.avviaSimulazionePalio = function() {
     const dLapDi = nc => (rawCum[nc][g] - minG[g]) / lapRef[g];
     let ordVis = ord;
     let dLapVincitore = null;   // distacco "preso in prestito" per il vincitore spostato
-    if (copriVincitore && g < st.totalGiri - 1) {
+    if (vincitoreAlComando && g < st.totalGiri - 1) {
+      const naturale = ord.indexOf(vincitoreUfficiale);
+      if (naturale > 3) {
+        const bersaglio = Math.floor(Math.random() * 4);
+        dLapVincitore = dLapDi(ord[bersaglio]);
+        ordVis = ord.filter(nc => nc !== vincitoreUfficiale);
+        ordVis.splice(bersaglio, 0, vincitoreUfficiale);
+      }
+    } else if (copriVincitore && g < st.totalGiri - 1) {
       const naturale = ord.indexOf(vincitoreUfficiale);
       const bersaglio = rankBersaglio[g];
       if (naturale < bersaglio) {
@@ -9935,18 +9980,19 @@ function eseguiAvanzamentoMeseFantinoEffettivo(){
   }
   if(nuovoAnno){
     // Intesa con le contrade in base ai Palii (Luglio/Agosto) vinti dal giocatore nell'annata appena conclusa:
-    // 2 vinti → invariata · 1 vinto → -5 con tutte le contrade · nessuno → -10 con tutte le contrade
+    // 2 vinti → +10 con tutte le contrade · 1 vinto → invariata · nessuno → -10 con tutte le contrade
     const vintiAnno = S.paliVintiAnnoFantino || {};
     const nVinti = (vintiAnno.luglio ? 1 : 0) + (vintiAnno.agosto ? 1 : 0);
-    const malusAnno = nVinti >= 2 ? 0 : (nVinti === 1 ? 5 : 10);
-    if(malusAnno > 0){
+    const variazioneAnno = nVinti >= 2 ? 10 : (nVinti === 1 ? 0 : -10);
+    if(variazioneAnno !== 0){
       if(!S.intesaContrade) S.intesaContrade = {};
       CONTRADE.forEach(c=>{
         const att = (S.intesaContrade[c.nome] !== undefined) ? S.intesaContrade[c.nome] : 50;
-        S.intesaContrade[c.nome] = Math.max(0, att - malusAnno);
+        S.intesaContrade[c.nome] = Math.max(0, Math.min(100, att + variazioneAnno));
       });
+      normalizzaRivalitaIntesaContrade();
     }
-    S.log.push(`Bilancio dell'annata: ${nVinti} Palii vinti su 2 → intesa con le contrade ${malusAnno ? '−'+malusAnno : 'invariata'}.`);
+    S.log.push(`Bilancio dell'annata: ${nVinti} Palii vinti su 2 → intesa con le contrade ${variazioneAnno>0?'+'+variazioneAnno:(variazioneAnno<0?'−'+Math.abs(variazioneAnno):'invariata')}.`);
     S.paliVintiAnnoFantino = {};
     // I risultati del Palio di quest'annata sono ormai conclusi: si riparte daccapo per la prossima
     S.palioLuglioAnno = null;
