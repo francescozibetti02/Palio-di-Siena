@@ -2443,7 +2443,7 @@ function preparaCorsaPalio(tipoPalio) {
   });
 
   /* Classifica finale per tempo cumulativo */
-  const classifica = tempiGiri.slice().sort((a, b) => a.tempoCumulativo - b.tempoCumulativo);
+  const classifica = tempiGiri.slice().sort((a, b) => (a.caduto?1:0) - (b.caduto?1:0) || a.tempoCumulativo - b.tempoCumulativo);   // i caduti (gara non conclusa) sempre in fondo
   const classificaGiri = [];
   for (let g = 0; g < NUM_GIRI_PALIO; g++) {
     const alGiro = tempiGiri.map(e => ({
@@ -2583,7 +2583,7 @@ function preparaCorsaPalioFantino(tipoPalio) {
     return { nomeContrada: cp.nomeContrada, isMe: cp.isMe, giri, tempoCumulativo, scosso: statoScosso.scosso, giroScosso: statoScosso.giro, caduto: esitoCaduto };
   });
 
-  const classifica = tempiGiri.slice().sort((a, b) => a.tempoCumulativo - b.tempoCumulativo);
+  const classifica = tempiGiri.slice().sort((a, b) => (a.caduto?1:0) - (b.caduto?1:0) || a.tempoCumulativo - b.tempoCumulativo);   // i caduti (gara non conclusa) sempre in fondo
   const classificaGiri = [];
   for (let g = 0; g < NUM_GIRI_PALIO; g++) {
     const alGiro = tempiGiri.map(e => ({
@@ -11280,8 +11280,8 @@ function renderTrisAllenamento(){
     const simbolo = cella==='P' ? '🐎' : cella==='C' ? '✖️' : '';
     const disabilitato = !!cella || st.finita || st.turno!=='P';
     return `<button onclick="giocaCellaTris(${idx})" ${disabilitato?'disabled':''}
-      style="aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid rgba(200,153,30,.22);
-      font-size:18px;display:flex;align-items:center;justify-content:center;cursor:${disabilitato?'default':'pointer'}">${simbolo}</button>`;
+      style="aspect-ratio:1;border-radius:8px;background:#f3e6c8;border:2px solid #c8991e;opacity:1;color:#000;
+      font-size:26px;display:flex;align-items:center;justify-content:center;cursor:${disabilitato?'default':'pointer'}">${simbolo}</button>`;
   }).join('');
 
   let messaggio;
@@ -13084,7 +13084,7 @@ function preparaAccordiContradeFantino(tipoPalio){
       let offerta = 0;
       if(attiva){
         const fattoreRandom = 0.8 + Math.random() * 0.4;
-        offerta = Math.max(0, Math.round(mediaFantino * 150 * fattoreRandom) + bonusProve);
+        offerta = Math.max(100, Math.round(mediaFantino * 150 * fattoreRandom) + bonusProve);   // offerta minima 100 oro, qualunque sia l'esito delle prove
       }
       offerte[nomeContrada] = { intesa, attiva, offerta };
     });
